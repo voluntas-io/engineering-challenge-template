@@ -47,7 +47,7 @@ use std::{
     io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         mpsc::{Sender, channel},
     },
     thread::JoinHandle,
@@ -325,6 +325,15 @@ struct Inner {
     queue: QueueSender<Command>,
     join: Mutex<Option<JoinHandle<()>>>,
     shutdown: Mutex<bool>,
+    admission: Mutex<Admission>,
+    admission_cv: Condvar,
+}
+
+/// Producer admission control. Closing admission before finalization prevents a
+/// record from entering the queue behind the Finalize command.
+struct Admission {
+    accepting: bool,
+    active: usize,
 }
 
 /// Cloneable handle to the journal writer.
@@ -390,6 +399,11 @@ impl JournalHandle {
             queue,
             join: Mutex::new(None),
             shutdown: Mutex::new(false),
+            admission: Mutex::new(Admission {
+                accepting: true,
+                active: 0,
+            }),
+            admission_cv: Condvar::new(),
         });
         let worker_inner = Arc::clone(&inner);
         let join = std::thread::Builder::new()
@@ -421,17 +435,18 @@ impl JournalHandle {
         outcome: DecodeOutcome,
     ) -> anyhow::Result<()> {
         {
-            let status = self
+            let mut admission = self
                 .inner
-                .status
+                .admission
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             anyhow::ensure!(
-                status.state.is_active(),
-                "journal is not accepting records in state {:?}: {}",
-                status.state,
-                status.last_error.as_deref().unwrap_or("no failure detail")
+                admission.accepting,
+                "journal is not accepting records: {}",
+                self.failure_reason()
+                    .unwrap_or_else(|| "shutdown in progress".to_owned())
             );
+            admission.active = admission.active.saturating_add(1);
         }
         let job = RecordJob {
             source,
@@ -443,8 +458,23 @@ impl JournalHandle {
             outcome,
         };
         let timeout = Duration::from_millis(self.inner.durability.enqueue_timeout_ms);
-        match self.inner.queue.send_timeout(Command::Record(job), timeout) {
+        let result = self.inner.queue.send_timeout(Command::Record(job), timeout);
+        {
+            let mut admission = self
+                .inner
+                .admission
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            admission.active = admission.active.saturating_sub(1);
+            if admission.active == 0 {
+                self.inner.admission_cv.notify_all();
+            }
+        }
+        match result {
             Ok(()) => {
+                if let Some(reason) = self.failure_reason() {
+                    bail!("journal failed while accepting a record: {reason}");
+                }
                 let mut status = self
                     .inner
                     .status
@@ -479,12 +509,30 @@ impl JournalHandle {
             .clone()
     }
 
+    fn failure_reason(&self) -> Option<String> {
+        run_failure(&self.inner)
+    }
+
     fn mark_failed(&self, reason: &str) {
-        set_state(&self.inner, RunState::Failed, Some(reason.to_owned()));
+        let mut status = self
+            .inner
+            .status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if status.state == RunState::Finalized {
+            return;
+        }
+        status.state = RunState::Failed;
+        status.last_error = Some(reason.to_owned());
     }
 
     /// Finalize every segment, write the run manifest, and join the writer.
+    ///
+    /// The timeout bounds producer quiescence, command delivery, response
+    /// waiting, and writer observation. A deadline expiry returns an error and
+    /// leaves the run failed or incomplete; it does not claim finalization.
     pub fn shutdown(&self, timeout: Duration) -> anyhow::Result<JournalSummary> {
+        let deadline = Instant::now() + timeout;
         {
             let mut shutdown = self
                 .inner
@@ -494,6 +542,41 @@ impl JournalHandle {
             anyhow::ensure!(!*shutdown, "journal shutdown was already requested");
             *shutdown = true;
         }
+        if self.status().state == RunState::Incomplete {
+            bail!("journal run is incomplete and cannot be finalized");
+        }
+
+        {
+            let mut admission = self
+                .inner
+                .admission
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            admission.accepting = false;
+            while admission.active > 0 {
+                let remaining = deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    drop(admission);
+                    let reason =
+                        format!("journal shutdown timed out waiting for producers for {timeout:?}");
+                    self.mark_failed(&reason);
+                    return Err(anyhow::anyhow!("{reason}"));
+                }
+                admission = self
+                    .inner
+                    .admission_cv
+                    .wait_timeout(admission, remaining)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .0;
+            }
+        }
+
+        if let Some(reason) = self.failure_reason() {
+            let _ = self.inner.queue.send(Command::Abort);
+            self.join_writer(timeout);
+            bail!("journal run failed: {reason}");
+        }
+
         let (reply_tx, reply_rx) = channel();
         self.inner
             .queue
@@ -516,9 +599,17 @@ impl JournalHandle {
     /// Stop the writer without finalizing.
     ///
     /// The open segment stays as a `.partial` file and the manifest keeps its
-    /// open state. Verification reports the run as incomplete; no footer or
-    /// manifest entry is fabricated.
+    /// open or failed state. Verification reports the run as incomplete; no
+    /// footer or manifest entry is fabricated.
     pub fn abort(&self, timeout: Duration) {
+        {
+            let mut admission = self
+                .inner
+                .admission
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            admission.accepting = false;
+        }
         let _ = self.inner.queue.send(Command::Abort);
         self.join_writer(timeout);
     }
@@ -562,6 +653,19 @@ fn set_state(inner: &Inner, state: RunState, error: Option<String>) {
     if error.is_some() {
         status.last_error = error;
     }
+}
+
+fn run_failure(inner: &Inner) -> Option<String> {
+    let status = inner
+        .status
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    (status.state == RunState::Failed).then(|| {
+        status
+            .last_error
+            .clone()
+            .unwrap_or_else(|| "failed".to_owned())
+    })
 }
 
 struct RecordJob {
@@ -908,6 +1012,10 @@ fn run_writer(
     let mut last_sync = Instant::now();
 
     loop {
+        if let Some(reason) = run_failure(&inner) {
+            fail_reason(&inner, &mut manifest, &reason);
+            return;
+        }
         select! {
             recv(queue) -> message => match message {
                 Ok(Command::Record(job)) => {
@@ -978,11 +1086,15 @@ fn run_writer(
                     return;
                 }
                 Ok(Command::Abort) => {
-                    set_state(
-                        &inner,
-                        RunState::Incomplete,
-                        Some("journal stopped without finalization".to_owned()),
-                    );
+                    if let Some(reason) = run_failure(&inner) {
+                        fail_reason(&inner, &mut manifest, &reason);
+                    } else {
+                        set_state(
+                            &inner,
+                            RunState::Incomplete,
+                            Some("journal stopped without finalization".to_owned()),
+                        );
+                    }
                     return;
                 }
                 Err(_) => {
@@ -1088,8 +1200,17 @@ fn finalize_run(
     segment: SegmentWriter,
     fault: Option<&FaultHook>,
 ) -> anyhow::Result<JournalSummary> {
+    if let Some(reason) = run_failure(inner) {
+        fail_reason(inner, manifest, &reason);
+        bail!("journal run failed before finalization: {reason}");
+    }
     run_fault(fault, FaultPoint::Finalize)?;
     let entry = segment.finalize()?;
+    if let Some(reason) = run_failure(inner) {
+        manifest.segments.push(entry);
+        fail_reason(inner, manifest, &reason);
+        bail!("journal run failed during finalization: {reason}");
+    }
     manifest.segments.push(entry);
     manifest.state = RunState::Finalized;
     manifest.finalized_at_us = Some(now_us().unwrap_or(0));
@@ -1111,8 +1232,13 @@ fn finalize_run(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     status.state = RunState::Finalized;
     status.counters.finalized = status.counters.written;
+    // Segment finalization flushed and synced every written record before the
+    // rename, so the durability counters must not lag the footer.
+    status.counters.flushed = status.counters.written;
+    status.counters.synced = status.counters.written;
     status.counters.segments = segment_count;
     status.counters.bytes = bytes;
+    status.counters.queue_depth = 0;
     Ok(JournalSummary {
         run_id: inner.run_id.clone(),
         run_directory: inner.run_directory.display().to_string(),
@@ -1125,10 +1251,14 @@ fn finalize_run(
 
 fn fail(inner: &Inner, manifest: &mut Manifest, error: &anyhow::Error) {
     let message = format!("{error:#}");
+    fail_reason(inner, manifest, &message);
+}
+
+fn fail_reason(inner: &Inner, manifest: &mut Manifest, message: &str) {
     manifest.state = RunState::Failed;
-    manifest.failure = Some(message.clone());
+    manifest.failure = Some(message.to_owned());
     let _ = write_manifest(&inner.run_directory, manifest);
-    set_state(inner, RunState::Failed, Some(message));
+    set_state(inner, RunState::Failed, Some(message.to_owned()));
 }
 
 fn write_manifest(directory: &Path, manifest: &Manifest) -> anyhow::Result<()> {
@@ -2018,7 +2148,7 @@ mod tests {
     }
 
     #[test]
-    fn queue_saturation_fails_instead_of_dropping() {
+    fn queue_saturation_then_shutdown_stays_failed() {
         let temp = TempDir::new().expect("tempdir");
         let (release_tx, release_rx) = mpsc::channel();
         let release_rx = Arc::new(std::sync::Mutex::new(release_rx));
@@ -2030,7 +2160,7 @@ mod tests {
             {
                 let _ = entered_tx.send(());
                 if let Ok(receiver) = release_rx.lock() {
-                    let _ = receiver.recv_timeout(Duration::from_secs(5));
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
                 }
             }
             Ok(())
@@ -2070,10 +2200,122 @@ mod tests {
             .expect_err("third record must fail");
         assert!(format!("{error:#}").contains("queue stayed full"));
         assert_eq!(handle.status().state, RunState::Failed);
+
+        // The production coordinator finalizes through `shutdown`, not
+        // `abort`. The latched failure must survive that path: the run may
+        // never report a complete journal after a rejected frame.
         let _ = release_tx.send(());
-        handle.abort(Duration::from_secs(1));
+        let shutdown = handle.shutdown(Duration::from_secs(2));
+        assert!(shutdown.is_err(), "shutdown must fail after saturation");
+        assert_eq!(handle.status().state, RunState::Failed);
+        assert!(handle.status().last_error.is_some());
+        let directory = run_directory(temp.path(), "run");
+        let verification = verify_run(&directory).expect("verify");
+        assert!(!verification.complete, "{:?}", verification.errors);
+        assert_eq!(verification.state, RunState::Failed);
+        assert!(
+            verification
+                .errors
+                .iter()
+                .any(|error| error.contains("Failed")),
+            "verifier must surface the failed run state: {:?}",
+            verification.errors
+        );
+        // The third payload was never accepted, so it must not appear anywhere.
+        let records = read_records(&directory).unwrap_or_default();
+        assert!(
+            records.iter().all(|record| record.payload != b"third"),
+            "a rejected payload must not be written"
+        );
+    }
+
+    #[test]
+    fn concurrent_producers_stop_after_failure() {
+        let temp = TempDir::new().expect("tempdir");
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::Write {
+                bail!("simulated write failure");
+            }
+            Ok(())
+        });
+        let handle = JournalHandle::start_inner(test_config(temp.path()), meta("run"), Some(hook))
+            .expect("start");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"trigger",
+            DecodeOutcome::decoded(1),
+        );
+        wait_failed(&handle);
+
+        let handle = Arc::new(handle);
+        let workers: Vec<_> = (0..4)
+            .map(|replica| {
+                let handle = Arc::clone(&handle);
+                thread::spawn(move || {
+                    let source = SourceId::new(0, replica);
+                    for seq in 1..=25u64 {
+                        match handle.record(
+                            source,
+                            1,
+                            seq,
+                            now_us().unwrap_or(0),
+                            RawFrame::binary(b"late".to_vec()),
+                            DecodeOutcome::decoded(1),
+                        ) {
+                            Ok(()) => {}
+                            Err(error) => return Err(format!("{error:#}")),
+                        }
+                    }
+                    Ok(())
+                })
+            })
+            .collect();
+        for worker in workers {
+            let outcome = worker.join().expect("worker joined");
+            assert!(outcome.is_err(), "a latched journal must reject records");
+        }
+        assert_eq!(handle.status().state, RunState::Failed);
         let verification = verify_run(&run_directory(temp.path(), "run")).expect("verify");
         assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+    }
+
+    #[test]
+    fn successful_shutdown_reconciles_counters() {
+        let temp = TempDir::new().expect("tempdir");
+        let handle = start(temp.path(), "run");
+        for seq in 1..=5 {
+            append(
+                &handle,
+                SourceId::new(0, 0),
+                1,
+                seq,
+                &[b'r'; 64],
+                DecodeOutcome::decoded(1),
+            );
+        }
+        let summary = handle
+            .shutdown(Duration::from_secs(2))
+            .expect("journal shutdown");
+        let status = handle.status();
+        assert_eq!(status.state, RunState::Finalized);
+        assert!(status.last_error.is_none());
+        assert_eq!(status.counters.queued, 5);
+        assert_eq!(status.counters.written, 5);
+        assert_eq!(status.counters.flushed, 5);
+        assert_eq!(status.counters.synced, 5);
+        assert_eq!(status.counters.finalized, 5);
+        assert_eq!(status.counters.queue_depth, 0);
+        assert_eq!(summary.record_count, 5);
+        assert_eq!(summary.record_count, status.counters.finalized);
+        let directory = run_directory(temp.path(), "run");
+        let verification = verify_run(&directory).expect("verify");
+        assert!(verification.complete, "{:?}", verification.errors);
+        assert_eq!(verification.record_count, status.counters.finalized);
+        assert_eq!(verification.segments.len() as u64, status.counters.segments);
     }
 
     #[test]
