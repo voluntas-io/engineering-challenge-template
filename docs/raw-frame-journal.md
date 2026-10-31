@@ -65,7 +65,7 @@ Each frame becomes one record:
 | `schema_version` | Journal schema version (`1`). |
 | `source` | Source identity such as `s0r0`, with `shard` and `replica` fields. |
 | `connection_epoch` | Increments on every successful websocket connection for that source. |
-| `receive_seq` | Per-source frame counter, reset to zero for each new epoch and advanced for every payload read, including payloads that fail decoding. |
+| `receive_seq` | Per-source frame counter, reset to zero for each new epoch and advanced exactly once for every payload read at the ingress boundary — before any decode or protocol decision — including ignored and rejected payloads. |
 | `received_at_us` | Unix-epoch microseconds captured immediately after the payload is read and before decoding. |
 | `clock_source` | Fixed label `unix_epoch_microseconds`. |
 | `frame_kind` | `text` or `binary`, preserved from the transport. |
@@ -73,10 +73,31 @@ Each frame becomes one record:
 | `decode` | `{"status":"decoded","events":N}`, `{"status":"ignored","reason":"..."}`, or `{"status":"rejected","category":"..."}`. |
 | payload | Exact bytes as received. No re-encoding, truncation, or normalization. |
 
-Rejected frames keep their payload and a stable category such as
-`invalid_json` or `invalid_payload`. Error text and payload previews are not
-written into the record header, so a journal does not accumulate unbounded
-diagnostic strings.
+## Capture boundary
+
+Every application payload yielded by the WebSocket layer is journaled before
+parsing or protocol decisions, exactly once per payload read. This includes:
+
+- payloads that decode into events (`decoded`);
+- valid payloads the adapter reads but does not act on, recorded with an
+  explicit `ignored` reason — for example `control_frame` (PING/PONG text),
+  `empty_frame`, `no_events`, `unknown_event_type`, and Kalshi's
+  `stale_snapshot`, `foreign_lifecycle`, `subscription_ack`, `command_ack`,
+  `handled_server_error`, `unsubscribed`, and `ignored_event`;
+- payloads a decode or protocol check rejects, recorded with a stable
+  category — `invalid_json`, `invalid_payload`, or `protocol_violation` —
+  together with their untouched bytes, including the payload that triggered a
+  reconnect.
+
+Transport-level idle events (websocket ping/pong frames with no application
+payload) are out of scope: they advance neither the receive fence nor the
+journal. A frame the venue wrote into a socket at the moment a connection is
+torn down is a transport loss, not a journal accounting failure; the journal
+accounts for every payload the collector actually read.
+
+Rejected frames keep their payload and a stable category. Error text and
+payload previews are not written into the record header, so a journal does not
+accumulate unbounded diagnostic strings.
 
 A record is framed as:
 
@@ -142,23 +163,42 @@ previous sequence number or hide itself from recovery ordering.
 - `queue_depth`: current backlog.
 - `bytes`: record-region bytes in active and finalized segments.
 
+At finalization the segment footer's flush and fsync cover every written
+record, so `flushed` and `synced` equal `written`, `finalized` equals the
+verifier's record count, and `queue_depth` is zero on a healthy shutdown.
+
 Only `finalized` is evidence of a complete run. The run report includes the
 final `JournalStatus`, including the run directory and any failure text.
 
 ## Failure behavior
 
-The journal fails the run instead of dropping a frame:
+The journal fails the run instead of dropping a frame, and a failure is
+terminal for the run:
 
-- A full queue that stays full for `enqueue_timeout_ms` marks the run failed and
-  returns an error to the source worker.
+- A full queue that stays full for `enqueue_timeout_ms` marks the run failed
+  and returns an error to the source worker. The failure is latched: the
+  writer observes it before every command, later records are rejected, and
+  finalization refuses to set `finalized` on a failed run — including when the
+  failure was latched by a producer and the normal shutdown path runs.
 - A write, flush, sync, rotation, or finalization error marks the manifest
   `failed`, records the error, stops the writer, and rejects later records.
-- Finalization uses the same send timeout as the SBE writer. A timeout marks the
-  journal failed and is returned as a run error.
-- An abrupt stop or explicit abort leaves the active `.partial` segment and an
-  open manifest. Verification reports the run incomplete.
+- A source worker whose journal record is rejected stops the collector with a
+  fatal error, so the run report cannot describe a healthy capture after the
+  journal lost a frame.
 - Records accepted into the queue are either written to a finalized segment or
-  the run ends with a failure. There is no silent drop path.
+  the run ends with a failure. There is no silent drop path, and a run that
+  latched a failure never verifies as complete.
+
+`shutdown` and `abort` are bounded by a single absolute deadline computed at
+entry. The deadline bounds producer quiescence (producers active in `record`
+are admitted before finalization), command delivery, the response wait, and
+writer-thread observation. A deadline expiry returns an error, marks the run
+failed, and never claims finalization. A writer still blocked inside an
+operating-system write cannot be interrupted; the call reports the timeout
+instead of falsely claiming the thread stopped.
+
+An abrupt stop or explicit abort leaves the active `.partial` segment and an
+open or failed manifest. Verification reports the run incomplete.
 
 Disk-full, permission, and fsync failures surface through the same paths. The
 collector does not claim durability for a record that only reached the process
@@ -183,6 +223,11 @@ rejects any `.pmj.partial` file.
 `journal::read_records` performs the same completeness check and then returns
 records in file order with their exact payloads.
 
+The checksums are integrity, not authenticity: SHA-256 detects accidental
+corruption and truncation, but an actor who can rewrite a segment can recompute
+both payload and checksums. Tamper evidence requires an external copy of the
+manifest or segment digests.
+
 ## Current limits
 
 - No compression, retention policy, disk watermark, or cross-run index is
@@ -193,3 +238,8 @@ records in file order with their exact payloads.
 - Payloads are not encrypted. Directory permissions are the access boundary.
 - The journal complements, rather than replaces, the SBE capture. Existing
   consumers can continue to read the unchanged SBE output.
+- The failure-state, bounded-shutdown, and ingress-coverage contracts are
+  verified by deterministic fault injection and mock-exchange scenarios. A
+  live-feed soak with segment rotation and a storage-exhaustion run on an
+  isolated volume remain open operational evidence; neither has been executed
+  yet, and no feed-completeness claim may be derived from journal integrity.
