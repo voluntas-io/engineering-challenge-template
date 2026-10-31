@@ -428,12 +428,33 @@ impl KalshiSession {
     fn note_recovery(&mut self) -> Result<(), SessionFailure> {
         self.transient_recoveries = self.transient_recoveries.saturating_add(1);
         if self.transient_recoveries > MAX_TRANSIENT_RECOVERIES {
-            return Err(SessionFailure::Protocol(anyhow::anyhow!(
+            return Err(SessionFailure::protocol(anyhow::anyhow!(
                 "Kalshi command recovery exceeded {MAX_TRANSIENT_RECOVERIES} consecutive attempts"
             )));
         }
         Ok(())
     }
+}
+
+/// An application payload the adapter read but did not act on. The exact bytes
+/// are preserved so the journal records every received frame with an explicit
+/// ignored outcome instead of dropping it after the read.
+fn ignored_payload_frame(
+    kind: FrameKind,
+    text: &str,
+    received_at_us: i64,
+    reason: &str,
+) -> SessionFrame {
+    SessionFrame::data(
+        Vec::new(),
+        text.len(),
+        RawFrame {
+            kind,
+            payload: text.as_bytes().to_vec(),
+        },
+        DecodeOutcome::ignored(reason),
+        received_at_us,
+    )
 }
 
 #[async_trait]
@@ -491,7 +512,7 @@ impl MarketDataSession for KalshiSession {
         } else {
             let since = *self.pending_since.get_or_insert_with(Instant::now);
             if since.elapsed() > Duration::from_secs(15) {
-                return Err(SessionFailure::Protocol(anyhow::anyhow!(
+                return Err(SessionFailure::protocol(anyhow::anyhow!(
                     "Kalshi orderbook command acknowledgement timed out"
                 )));
             }
@@ -532,7 +553,14 @@ impl MarketDataSession for KalshiSession {
         match message {
             KalshiMessage::Snapshot { sid, seq, event } => {
                 if !self.seq.on_snapshot(sid, seq) {
-                    return Ok(SessionFrame::idle(bytes));
+                    // A stale or duplicate snapshot is valid JSON the venue
+                    // sent; keep the exact bytes in the journal and move on.
+                    return Ok(ignored_payload_frame(
+                        kind,
+                        &text,
+                        received_at_us,
+                        "stale_snapshot",
+                    ));
                 }
                 Ok(SessionFrame::data(
                     vec![event],
@@ -546,9 +574,16 @@ impl MarketDataSession for KalshiSession {
                 ))
             }
             KalshiMessage::Delta { sid, seq, event } => {
-                self.seq
-                    .on_delta(sid, seq)
-                    .map_err(|error| SessionFailure::Protocol(anyhow::anyhow!(error)))?;
+                self.seq.on_delta(sid, seq).map_err(|error| {
+                    SessionFailure::protocol_with_frame(
+                        anyhow::anyhow!(error),
+                        RawFrame {
+                            kind,
+                            payload: text.as_bytes().to_vec(),
+                        },
+                        received_at_us,
+                    )
+                })?;
                 Ok(SessionFrame::data(
                     vec![event],
                     bytes,
@@ -576,7 +611,12 @@ impl MarketDataSession for KalshiSession {
                         received_at_us,
                     ))
                 } else {
-                    Ok(SessionFrame::idle(bytes))
+                    Ok(ignored_payload_frame(
+                        kind,
+                        &text,
+                        received_at_us,
+                        "foreign_lifecycle",
+                    ))
                 }
             }
             KalshiMessage::Subscribed { id, channel, sid } => {
@@ -588,18 +628,30 @@ impl MarketDataSession for KalshiSession {
                         "Kalshi orderbook subscription acknowledgement referenced an unknown id",
                     )?;
                     if markets.is_empty() {
-                        return Err(SessionFailure::Protocol(anyhow::anyhow!(
-                            "Kalshi orderbook subscription acknowledgement had an empty market set"
-                        )));
+                        return Err(SessionFailure::protocol_with_frame(
+                            anyhow::anyhow!(
+                                "Kalshi orderbook subscription acknowledgement had an empty market set"
+                            ),
+                            RawFrame {
+                                kind,
+                                payload: text.as_bytes().to_vec(),
+                            },
+                            received_at_us,
+                        ));
                     }
                     if self
                         .orderbook_subs
                         .iter()
                         .any(|subscription| subscription.sid == sid)
                     {
-                        return Err(SessionFailure::Protocol(anyhow::anyhow!(
-                            "Kalshi orderbook subscription reused sid {sid}"
-                        )));
+                        return Err(SessionFailure::protocol_with_frame(
+                            anyhow::anyhow!("Kalshi orderbook subscription reused sid {sid}"),
+                            RawFrame {
+                                kind,
+                                payload: text.as_bytes().to_vec(),
+                            },
+                            received_at_us,
+                        ));
                     }
                     self.orderbook_subs
                         .push(OrderbookSubscription { sid, markets });
@@ -612,7 +664,12 @@ impl MarketDataSession for KalshiSession {
                     self.pending_since = None;
                     self.reconcile().await?;
                 }
-                Ok(SessionFrame::idle(bytes))
+                Ok(ignored_payload_frame(
+                    kind,
+                    &text,
+                    received_at_us,
+                    "subscription_ack",
+                ))
             }
             KalshiMessage::Ok { id, sid, seq } => {
                 let completed = id.and_then(|id| self.complete_update(id));
@@ -631,7 +688,12 @@ impl MarketDataSession for KalshiSession {
                     self.pending_since = None;
                     self.reconcile().await?;
                 }
-                Ok(SessionFrame::idle(bytes))
+                Ok(ignored_payload_frame(
+                    kind,
+                    &text,
+                    received_at_us,
+                    "command_ack",
+                ))
             }
             KalshiMessage::Error { id, code, message } => {
                 let pending_update = id.and_then(|id| self.pending_updates.remove(&id));
@@ -654,13 +716,25 @@ impl MarketDataSession for KalshiSession {
                         );
                         self.note_recovery()?;
                         if self.batch_size <= 1 {
-                            return Err(SessionFailure::Protocol(anyhow::anyhow!(
-                                "Kalshi rejected a one-market subscription with code 26: {message}"
-                            )));
+                            return Err(SessionFailure::protocol_with_frame(
+                                anyhow::anyhow!(
+                                    "Kalshi rejected a one-market subscription with code 26: {message}"
+                                ),
+                                RawFrame {
+                                    kind,
+                                    payload: text.as_bytes().to_vec(),
+                                },
+                                received_at_us,
+                            ));
                         }
                         self.batch_size = (self.batch_size / 2).max(1);
                         self.reconcile().await?;
-                        Ok(SessionFrame::idle(bytes))
+                        Ok(ignored_payload_frame(
+                            kind,
+                            &text,
+                            received_at_us,
+                            "handled_server_error",
+                        ))
                     }
                     // Command rate limit: back off, then let reconcile retry
                     // the commands that are still required.
@@ -675,7 +749,12 @@ impl MarketDataSession for KalshiSession {
                         self.rate_limit_backoff =
                             (self.rate_limit_backoff * 2).min(RATE_LIMIT_BACKOFF_MAX);
                         self.reconcile().await?;
-                        Ok(SessionFrame::idle(bytes))
+                        Ok(ignored_payload_frame(
+                            kind,
+                            &text,
+                            received_at_us,
+                            "handled_server_error",
+                        ))
                     }
                     // Unknown sid, channel failure, or subscription buffer
                     // overflow are terminal for one subscription. Drop it and
@@ -691,12 +770,24 @@ impl MarketDataSession for KalshiSession {
                             self.drop_subscription(pending.sid);
                         }
                         self.reconcile().await?;
-                        Ok(SessionFrame::idle(bytes))
+                        Ok(ignored_payload_frame(
+                            kind,
+                            &text,
+                            received_at_us,
+                            "handled_server_error",
+                        ))
                     }
-                    _ => Err(SessionFailure::Protocol(anyhow::anyhow!(
-                        "Kalshi websocket error (code {}): {message}",
-                        code.map_or_else(|| "unknown".to_owned(), |code| code.to_string())
-                    ))),
+                    _ => Err(SessionFailure::protocol_with_frame(
+                        anyhow::anyhow!(
+                            "Kalshi websocket error (code {}): {message}",
+                            code.map_or_else(|| "unknown".to_owned(), |code| code.to_string())
+                        ),
+                        RawFrame {
+                            kind,
+                            payload: text.as_bytes().to_vec(),
+                        },
+                        received_at_us,
+                    )),
                 }
             }
             KalshiMessage::Unsubscribed { sid, .. } => {
@@ -705,9 +796,19 @@ impl MarketDataSession for KalshiSession {
                         .retain(|subscription| subscription.sid != sid);
                     self.seq.forget(sid);
                 }
-                Ok(SessionFrame::idle(bytes))
+                Ok(ignored_payload_frame(
+                    kind,
+                    &text,
+                    received_at_us,
+                    "unsubscribed",
+                ))
             }
-            KalshiMessage::Ignore { .. } => Ok(SessionFrame::idle(bytes)),
+            KalshiMessage::Ignore { .. } => Ok(ignored_payload_frame(
+                kind,
+                &text,
+                received_at_us,
+                "ignored_event",
+            )),
         }
     }
 
@@ -1255,7 +1356,7 @@ mod tests {
             }
         }
         assert!(
-            matches!(failure, Some(SessionFailure::Protocol(_))),
+            matches!(failure, Some(SessionFailure::Protocol { .. })),
             "unexpected failure: {failure:?}"
         );
         server.await.unwrap();
@@ -1280,6 +1381,110 @@ mod tests {
             matches!(failure, SessionFailure::Reconnect(_)),
             "unexpected failure: {failure:?}"
         );
+        server.await.unwrap();
+        session.close().await;
+    }
+
+    #[tokio::test]
+    async fn protocol_rejection_preserves_raw_payload() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let gap_delta = json!({
+            "type": "orderbook_delta", "sid": 7, "seq": 9,
+            "msg": {"market_ticker": "M1", "side": "yes", "price": 55, "delta": 1}
+        });
+        let server_delta = gap_delta.clone();
+        let server = tokio::spawn(async move {
+            let mut ws = accept(listener).await;
+            acknowledge_initial_subscriptions(&mut ws, 7).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "type": "orderbook_snapshot", "sid": 7, "seq": 5,
+                    "msg": {
+                        "market_ticker": "M1", "clock": 1,
+                        "yes_dollars_fp": [["0.5", "1"]]
+                    }
+                }),
+            )
+            .await;
+            send_json(&mut ws, server_delta).await;
+        });
+
+        let mut session = test_session(address).await;
+        session
+            .apply_subscriptions(&BTreeSet::from(["M1".to_owned()]))
+            .await
+            .unwrap();
+        let snapshot = next_event(&mut session).await;
+        assert!(matches!(snapshot, ExchangeEvent::Snapshot { .. }));
+        let failure = tokio::time::timeout(Duration::from_secs(5), session.next_frame())
+            .await
+            .expect("gap was not observed")
+            .expect_err("a sequence gap must fail the session");
+        match failure {
+            SessionFailure::Protocol {
+                frame: Some(raw), ..
+            } => {
+                assert_eq!(raw.kind, FrameKind::Text);
+                assert_eq!(raw.payload, gap_delta.to_string().into_bytes());
+            }
+            other => panic!("unexpected failure: {other:?}"),
+        }
+        server.await.unwrap();
+        session.close().await;
+    }
+
+    #[tokio::test]
+    async fn stale_snapshot_is_reported_as_ignored_payload() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let stale = json!({
+            "type": "orderbook_snapshot", "sid": 7, "seq": 5,
+            "msg": {
+                "market_ticker": "M1", "clock": 1,
+                "yes_dollars_fp": [["0.5", "1"]]
+            }
+        });
+        let server_stale = stale.clone();
+        let server = tokio::spawn(async move {
+            let mut ws = accept(listener).await;
+            acknowledge_initial_subscriptions(&mut ws, 7).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "type": "orderbook_snapshot", "sid": 7, "seq": 10,
+                    "msg": {
+                        "market_ticker": "M1", "clock": 1,
+                        "yes_dollars_fp": [["0.5", "1"]]
+                    }
+                }),
+            )
+            .await;
+            send_json(&mut ws, server_stale).await;
+        });
+
+        let mut session = test_session(address).await;
+        session
+            .apply_subscriptions(&BTreeSet::from(["M1".to_owned()]))
+            .await
+            .unwrap();
+        let snapshot = next_event(&mut session).await;
+        assert!(matches!(snapshot, ExchangeEvent::Snapshot { .. }));
+        let frame = tokio::time::timeout(Duration::from_secs(5), session.next_frame())
+            .await
+            .expect("stale snapshot was not observed")
+            .expect("a stale snapshot must not fail the session");
+        assert!(frame.events.is_empty());
+        assert_eq!(
+            frame.decode,
+            DecodeOutcome::ignored("stale_snapshot"),
+            "the stale snapshot must carry an explicit ignored outcome"
+        );
+        let raw = frame.raw.expect("stale snapshot must preserve its payload");
+        assert_eq!(raw.kind, FrameKind::Text);
+        assert_eq!(raw.payload, stale.to_string().into_bytes());
+        assert!(frame.received_at_us.is_some());
         server.await.unwrap();
         session.close().await;
     }
