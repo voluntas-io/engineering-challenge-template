@@ -72,6 +72,8 @@ flowchart TB
 
 **Goal:** A reviewer can identify which code and evidence are current.
 
+**Promotion review:** [`verification-2026-11-02-phase0-promotion.md`](verification-2026-11-02-phase0-promotion.md) records the full `main` promotion delta and its gate evidence.
+
 - Keep the passing baseline immutable; development changes go through topic branches and pull requests.
 - Mark the old `docs/architecture.md` content as a historical audit of the 2026-10-26 ZIP, not the active runtime architecture. Publish a current Polymarket target and clearly label implemented versus planned nodes.
 - Make the README describe the product honestly: current system = market-data collector; production target = Polymarket trading platform; order entry and risk controls are not yet implemented.
