@@ -327,6 +327,8 @@ struct Inner {
     shutdown: Mutex<bool>,
     admission: Mutex<Admission>,
     admission_cv: Condvar,
+    #[cfg(test)]
+    record_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 /// Producer admission control. Closing admission before finalization prevents a
@@ -334,6 +336,31 @@ struct Inner {
 struct Admission {
     accepting: bool,
     active: usize,
+}
+
+/// Keeps a producer counted as active until the whole record operation —
+/// enqueue, failure latching, and counter updates — has completed.
+///
+/// Dropping the guard is the only place that decrements the active producer
+/// count, so shutdown and abort cannot observe quiescence while a producer is
+/// still about to mark the journal failed.
+struct AdmissionGuard<'a> {
+    inner: &'a Inner,
+}
+
+impl Drop for AdmissionGuard<'_> {
+    fn drop(&mut self) {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        debug_assert!(admission.active > 0, "producer admission count underflowed");
+        admission.active = admission.active.saturating_sub(1);
+        if admission.active == 0 {
+            self.inner.admission_cv.notify_all();
+        }
+    }
 }
 
 /// Cloneable handle to the journal writer.
@@ -404,6 +431,8 @@ impl JournalHandle {
                 active: 0,
             }),
             admission_cv: Condvar::new(),
+            #[cfg(test)]
+            record_hook: Mutex::new(None),
         });
         let worker_inner = Arc::clone(&inner);
         let join = std::thread::Builder::new()
@@ -434,20 +463,10 @@ impl JournalHandle {
         frame: RawFrame,
         outcome: DecodeOutcome,
     ) -> anyhow::Result<()> {
-        {
-            let mut admission = self
-                .inner
-                .admission
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            anyhow::ensure!(
-                admission.accepting,
-                "journal is not accepting records: {}",
-                self.failure_reason()
-                    .unwrap_or_else(|| "shutdown in progress".to_owned())
-            );
-            admission.active = admission.active.saturating_add(1);
-        }
+        // The guard spans the entire operation. Shutdown and abort wait for it
+        // to drop, which happens only after a queue failure has been latched
+        // and accepted records have updated their counters.
+        let _admission = self.admit()?;
         let job = RecordJob {
             source,
             connection_epoch,
@@ -459,15 +478,19 @@ impl JournalHandle {
         };
         let timeout = Duration::from_millis(self.inner.durability.enqueue_timeout_ms);
         let result = self.inner.queue.send_timeout(Command::Record(job), timeout);
+        #[cfg(test)]
         {
-            let mut admission = self
+            // A deterministic test gate between the queue decision and the
+            // failure latch. It makes the admission-ordering regression
+            // reproducible instead of relying on scheduler timing.
+            let hook = self
                 .inner
-                .admission
+                .record_hook
                 .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            admission.active = admission.active.saturating_sub(1);
-            if admission.active == 0 {
-                self.inner.admission_cv.notify_all();
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if let Some(hook) = hook {
+                hook();
             }
         }
         match result {
@@ -498,6 +521,31 @@ impl JournalHandle {
                 bail!("{reason}")
             }
         }
+    }
+
+    fn admit(&self) -> anyhow::Result<AdmissionGuard<'_>> {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        anyhow::ensure!(
+            admission.accepting,
+            "journal is not accepting records: {}",
+            self.failure_reason()
+                .unwrap_or_else(|| "shutdown in progress".to_owned())
+        );
+        admission.active = admission.active.saturating_add(1);
+        Ok(AdmissionGuard { inner: &self.inner })
+    }
+
+    #[cfg(test)]
+    fn set_record_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .inner
+            .record_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
     }
 
     #[must_use]
@@ -546,30 +594,7 @@ impl JournalHandle {
             bail!("journal run is incomplete and cannot be finalized");
         }
 
-        {
-            let mut admission = self
-                .inner
-                .admission
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            admission.accepting = false;
-            while admission.active > 0 {
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                if remaining.is_zero() {
-                    drop(admission);
-                    let reason =
-                        format!("journal shutdown timed out waiting for producers for {timeout:?}");
-                    self.mark_failed(&reason);
-                    return Err(anyhow::anyhow!("{reason}"));
-                }
-                admission = self
-                    .inner
-                    .admission_cv
-                    .wait_timeout(admission, remaining)
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .0;
-            }
-        }
+        self.close_admission_and_wait(deadline, timeout, "shutdown")?;
 
         if let Some(reason) = self.failure_reason() {
             let _ = self.send_control(Command::Abort, deadline);
@@ -606,23 +631,58 @@ impl JournalHandle {
     ///
     /// The open segment stays as a `.partial` file and the manifest keeps its
     /// open or failed state. Verification reports the run as incomplete; no
-    /// footer or manifest entry is fabricated. The timeout bounds command
-    /// delivery and writer observation; it cannot interrupt a write that the
-    /// operating system is already performing.
+    /// footer or manifest entry is fabricated. The timeout bounds producer
+    /// quiescence, command delivery, and writer observation; it cannot
+    /// interrupt a write that the operating system is already performing.
     pub fn abort(&self, timeout: Duration) {
         let deadline = Instant::now() + timeout;
+        // Abort shares shutdown's producer-quiescence contract: the writer
+        // must not receive the stop command while a producer is still inside
+        // `record`.
+        if self
+            .close_admission_and_wait(deadline, timeout, "abort")
+            .is_err()
         {
-            let mut admission = self
-                .inner
-                .admission
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            admission.accepting = false;
+            self.join_writer(deadline);
+            return;
         }
         if self.send_control(Command::Abort, deadline).is_err() {
             self.mark_failed("journal abort command could not be delivered");
         }
         self.join_writer(deadline);
+    }
+
+    /// Close admission and wait until every admitted producer has completed,
+    /// within the absolute deadline shared with the caller.
+    fn close_admission_and_wait(
+        &self,
+        deadline: Instant,
+        timeout: Duration,
+        operation: &str,
+    ) -> anyhow::Result<()> {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        admission.accepting = false;
+        while admission.active > 0 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                drop(admission);
+                let reason =
+                    format!("journal {operation} timed out waiting for producers for {timeout:?}");
+                self.mark_failed(&reason);
+                return Err(anyhow::anyhow!("{reason}"));
+            }
+            admission = self
+                .inner
+                .admission_cv
+                .wait_timeout(admission, remaining)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
+        }
+        Ok(())
     }
 
     fn send_control(&self, command: Command, deadline: Instant) -> anyhow::Result<()> {
@@ -2271,6 +2331,223 @@ mod tests {
             records.iter().all(|record| record.payload != b"third"),
             "a rejected payload must not be written"
         );
+    }
+
+    #[test]
+    fn shutdown_waits_for_a_producer_failure_latch() {
+        let temp = TempDir::new().expect("tempdir");
+        let (release_writer_tx, release_writer_rx) = mpsc::channel();
+        let release_writer_rx = Arc::new(std::sync::Mutex::new(release_writer_rx));
+        let (writer_entered_tx, writer_entered_rx) = mpsc::channel();
+        let writer_blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::Write
+                && !writer_blocked.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = writer_entered_tx.send(());
+                if let Ok(receiver) = release_writer_rx.lock() {
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
+                }
+            }
+            Ok(())
+        });
+        let mut config = test_config(temp.path());
+        config.queue_capacity = 1;
+        config.enqueue_timeout = Duration::from_millis(150);
+        let handle =
+            Arc::new(JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start"));
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"first",
+            DecodeOutcome::decoded(1),
+        );
+        writer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer entered hook");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            2,
+            b"second",
+            DecodeOutcome::decoded(1),
+        );
+
+        // Hold the producer after the queue decision but before the failure
+        // latch. Its admission guard must keep shutdown from observing an
+        // idle producer set.
+        let (producer_entered_tx, producer_entered_rx) = mpsc::channel();
+        let (release_producer_tx, release_producer_rx) = mpsc::channel();
+        let release_producer_rx = Arc::new(std::sync::Mutex::new(release_producer_rx));
+        let producer_gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        handle.set_record_hook(Arc::new(move || {
+            if producer_gate.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let _ = producer_entered_tx.send(());
+            if let Ok(receiver) = release_producer_rx.lock() {
+                let _ = receiver.recv_timeout(Duration::from_secs(10));
+            }
+        }));
+
+        let producer = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || {
+                handle.record(
+                    SourceId::new(0, 0),
+                    1,
+                    3,
+                    now_us().unwrap_or(0),
+                    RawFrame::binary(b"third".to_vec()),
+                    DecodeOutcome::decoded(1),
+                )
+            })
+        };
+        producer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("producer reached the post-enqueue gate");
+
+        let shutdown = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || handle.shutdown(Duration::from_secs(2)))
+        };
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must wait for the active producer"
+        );
+
+        // Give shutdown queue space while the producer is still gated. If it
+        // were allowed to proceed, it would submit Finalize before the queue
+        // failure is latched.
+        let _ = release_writer_tx.send(());
+        thread::sleep(Duration::from_millis(150));
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must not finalize before the producer latches its queue failure"
+        );
+
+        let _ = release_producer_tx.send(());
+        assert!(
+            producer.join().expect("producer joined").is_err(),
+            "the timed-out enqueue must be reported"
+        );
+        assert!(
+            shutdown.join().expect("shutdown joined").is_err(),
+            "a latched queue failure must fail shutdown"
+        );
+        assert_eq!(handle.status().state, RunState::Failed);
+        let directory = run_directory(temp.path(), "run");
+        wait_for_verification_state(&directory, RunState::Failed);
+        let verification = verify_run(&directory).expect("verify");
+        assert!(!verification.complete, "{:?}", verification.errors);
+        assert!(
+            read_records(&directory)
+                .unwrap_or_default()
+                .iter()
+                .all(|record| record.payload != b"third"),
+            "the rejected payload must not be written"
+        );
+    }
+
+    #[test]
+    fn abort_waits_for_an_active_producer_before_stopping_the_writer() {
+        let temp = TempDir::new().expect("tempdir");
+        let (release_writer_tx, release_writer_rx) = mpsc::channel();
+        let release_writer_rx = Arc::new(std::sync::Mutex::new(release_writer_rx));
+        let (writer_entered_tx, writer_entered_rx) = mpsc::channel();
+        let writer_blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::Write
+                && !writer_blocked.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = writer_entered_tx.send(());
+                if let Ok(receiver) = release_writer_rx.lock() {
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
+                }
+            }
+            Ok(())
+        });
+        let mut config = test_config(temp.path());
+        config.queue_capacity = 2;
+        let handle =
+            Arc::new(JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start"));
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"first",
+            DecodeOutcome::decoded(1),
+        );
+        writer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer entered hook");
+
+        // This producer has already been admitted and enqueued successfully,
+        // but is held inside `record` before the admission guard is released.
+        let (producer_entered_tx, producer_entered_rx) = mpsc::channel();
+        let (release_producer_tx, release_producer_rx) = mpsc::channel();
+        let release_producer_rx = Arc::new(std::sync::Mutex::new(release_producer_rx));
+        let producer_gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        handle.set_record_hook(Arc::new(move || {
+            if producer_gate.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let _ = producer_entered_tx.send(());
+            if let Ok(receiver) = release_producer_rx.lock() {
+                let _ = receiver.recv_timeout(Duration::from_secs(10));
+            }
+        }));
+        let producer = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || {
+                handle.record(
+                    SourceId::new(0, 0),
+                    1,
+                    2,
+                    now_us().unwrap_or(0),
+                    RawFrame::binary(b"second".to_vec()),
+                    DecodeOutcome::decoded(1),
+                )
+            })
+        };
+        producer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("producer reached the post-enqueue gate");
+
+        let abort = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || handle.abort(Duration::from_secs(2)))
+        };
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !abort.is_finished(),
+            "abort must wait for the active producer"
+        );
+
+        // Free the writer. An abort that only stopped the writer would now
+        // complete while the producer is still inside `record`.
+        let _ = release_writer_tx.send(());
+        thread::sleep(Duration::from_millis(200));
+        assert!(
+            !abort.is_finished(),
+            "abort must not stop the writer while a producer is still active"
+        );
+
+        let _ = release_producer_tx.send(());
+        producer
+            .join()
+            .expect("producer joined")
+            .expect("the record was accepted before abort closed admission");
+        abort.join().expect("abort joined");
+        assert_eq!(handle.status().state, RunState::Incomplete);
+        let directory = run_directory(temp.path(), "run");
+        wait_for_verification_state(&directory, RunState::Open);
+        assert!(!verify_run(&directory).expect("verify").complete);
     }
 
     #[test]

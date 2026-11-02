@@ -878,10 +878,10 @@ async fn journal_ingress(
     received_at_us: i64,
     decode: DecodeOutcome,
 ) -> bool {
-    *receive_seq = receive_seq.saturating_add(1);
     let Some(payload) = payload else {
         return true;
     };
+    *receive_seq = receive_seq.saturating_add(1);
     status.bytes_received = status
         .bytes_received
         .saturating_add(payload.payload.len() as u64);
@@ -951,6 +951,120 @@ mod tests {
         let message = truncate_error(&error);
         assert!(message.ends_with('…'));
         assert!(message.len() <= 512 + '…'.len_utf8());
+    }
+
+    fn test_journal(root: &std::path::Path) -> JournalHandle {
+        use crate::journal::{JournalConfig, JournalMeta, SyncMode};
+
+        JournalHandle::start(
+            JournalConfig {
+                directory: root.to_path_buf(),
+                queue_capacity: 16,
+                enqueue_timeout: Duration::from_millis(250),
+                flush_interval: Duration::from_millis(10),
+                sync_interval: Duration::from_millis(20),
+                segment_max_bytes: 0,
+                segment_max_seconds: 0,
+                sync_mode: SyncMode::Interval,
+            },
+            JournalMeta {
+                run_id: "run".to_owned(),
+                venue: "test".to_owned(),
+                code_commit: "test".to_owned(),
+                config_sha256: "test".to_owned(),
+            },
+        )
+        .expect("journal start")
+    }
+
+    #[tokio::test]
+    async fn transport_idle_and_payloadless_protocol_failures_do_not_advance_the_fence() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let handle = test_journal(&temp.path().join("journal"));
+        let source = SourceId::new(0, 0);
+        let (events, _events_rx) = mpsc::channel(4);
+        let mut status = SourceStatus::new(source);
+        let mut receive_seq = 0u64;
+
+        // A transport ping/pong produces an idle session frame with no raw
+        // payload. It must not consume a journal sequence number.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                None,
+                1,
+                DecodeOutcome::default(),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 0);
+
+        // A protocol failure observed before any payload was read has no
+        // associated record and must not advance the fence either.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                None,
+                2,
+                DecodeOutcome::rejected("protocol_violation"),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 0);
+
+        // The first actual payload takes sequence 1, not 3.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                Some(RawFrame::text("payload".to_owned())),
+                3,
+                DecodeOutcome::decoded(1),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 1);
+
+        // An idle frame after a payload leaves the fence where it was.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                None,
+                4,
+                DecodeOutcome::default(),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 1);
+
+        let summary = handle
+            .shutdown(Duration::from_secs(2))
+            .expect("journal shutdown");
+        assert_eq!(summary.record_count, 1);
+        let records = crate::journal::read_records(std::path::Path::new(&summary.run_directory))
+            .expect("read records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].receive_seq, 1);
+        assert_eq!(records[0].payload, b"payload");
     }
 
     #[tokio::test]

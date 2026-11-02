@@ -91,9 +91,11 @@ parsing or protocol decisions, exactly once per payload read. This includes:
 
 Transport-level idle events (websocket ping/pong frames with no application
 payload) are out of scope: they advance neither the receive fence nor the
-journal. A frame the venue wrote into a socket at the moment a connection is
-torn down is a transport loss, not a journal accounting failure; the journal
-accounts for every payload the collector actually read.
+journal. A protocol failure observed before any payload was read (for example
+a pending-command acknowledgement timeout) likewise has no payload to journal
+and does not advance the fence. A frame the venue wrote into a socket at the
+moment a connection is torn down is a transport loss, not a journal accounting
+failure; the journal accounts for every payload the collector actually read.
 
 Rejected frames keep their payload and a stable category. Error text and
 payload previews are not written into the record header, so a journal does not

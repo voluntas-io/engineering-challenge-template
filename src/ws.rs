@@ -369,6 +369,45 @@ mod tests {
         server.await.unwrap();
     }
 
+    #[tokio::test]
+    async fn websocket_ping_and_pong_are_reported_as_idle() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let mut ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            ws.send(Message::Ping(b"keepalive".to_vec().into()))
+                .await
+                .unwrap();
+            ws.send(Message::Pong(b"ack".to_vec().into()))
+                .await
+                .unwrap();
+            ws.send(Message::Text("after-control".into()))
+                .await
+                .unwrap();
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        });
+
+        let mut stream = connect(&format!("ws://{address}"), &[], &ConnectOptions::default())
+            .await
+            .unwrap();
+        match next_payload(&mut stream).await.unwrap() {
+            WsPayload::Idle => {}
+            WsPayload::Text(_) | WsPayload::Binary(_) => panic!("a ping must be idle"),
+        }
+        match next_payload(&mut stream).await.unwrap() {
+            WsPayload::Idle => {}
+            WsPayload::Text(_) | WsPayload::Binary(_) => panic!("a pong must be idle"),
+        }
+        match next_payload(&mut stream).await.unwrap() {
+            WsPayload::Text(text) => assert_eq!(text, "after-control"),
+            WsPayload::Binary(_) | WsPayload::Idle => panic!("expected a text frame"),
+        }
+        server.await.unwrap();
+    }
+
     #[test]
     fn pinned_source_ports_are_derived_per_connection() {
         let options = ConnectOptions {

@@ -322,6 +322,8 @@ struct SubscriptionFrame {
 enum RawMockFrame {
     Text(String),
     Binary(Vec<u8>),
+    Ping(Vec<u8>),
+    Pong(Vec<u8>),
 }
 
 impl From<RawMockFrame> for Outbound {
@@ -329,6 +331,8 @@ impl From<RawMockFrame> for Outbound {
         match value {
             RawMockFrame::Text(text) => Self::Text(text),
             RawMockFrame::Binary(bytes) => Self::Binary(bytes),
+            RawMockFrame::Ping(bytes) => Self::Ping(bytes),
+            RawMockFrame::Pong(bytes) => Self::Pong(bytes),
         }
     }
 }
@@ -344,6 +348,8 @@ struct Connection {
 enum Outbound {
     Text(String),
     Binary(Vec<u8>),
+    Ping(Vec<u8>),
+    Pong(Vec<u8>),
     Close,
 }
 
@@ -796,6 +802,14 @@ impl MockExchange {
         self.state.publish_raw(RawMockFrame::Binary(bytes.to_vec()));
     }
 
+    fn publish_ping(&self, payload: &[u8]) {
+        self.state.publish_raw(RawMockFrame::Ping(payload.to_vec()));
+    }
+
+    fn publish_pong(&self, payload: &[u8]) {
+        self.state.publish_raw(RawMockFrame::Pong(payload.to_vec()));
+    }
+
     fn delivered_updates_for(&self, token: &str) -> Vec<MockUpdate> {
         self.state.delivered_updates_for(token)
     }
@@ -1053,6 +1067,16 @@ async fn handle_connection(id: u64, socket: TcpStream, state: Arc<MockState>) {
                             break;
                         }
                         state.frames_sent.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Some(Outbound::Ping(bytes)) => {
+                        if sink.send(Message::Ping(bytes.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Outbound::Pong(bytes)) => {
+                        if sink.send(Message::Pong(bytes.into())).await.is_err() {
+                            break;
+                        }
                     }
                     Some(Outbound::Close) | None => break,
                 }
@@ -2305,6 +2329,95 @@ async fn rejected_payloads_are_journaled_across_reconnects() {
         price_changes, 10,
         "both replicas must journal every delta delivered before the reconnects"
     );
+}
+
+/// Transport-level ping/pong frames carry no application payload. They must
+/// neither create journal records nor consume receive sequence numbers; only
+/// the data frames around them advance the fence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn transport_control_frames_do_not_advance_the_journal_fence() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let output = directory.path().join("journal-control.sbe");
+    let journal_root = directory.path().join("journal");
+    let mock = MockExchange::start(vec![market("cond-control", "asset-control")], false).await;
+    mock.set_book(
+        "asset-control",
+        &[(400_000, 8_000_000)],
+        &[(600_000, 2_000_000)],
+    );
+    let mut settings = test_settings(&mock, &output);
+    settings.journal.directory = Some(journal_root.clone());
+    let done = Arc::new(Notify::new());
+    let handle = spawn_collector(settings, Arc::clone(&done));
+
+    mock.wait_for_total_subscriptions(2).await;
+    mock.wait_for_stable_connections(2).await;
+    let connection_baseline = mock.next_id();
+    let data_baseline = mock.frames_sent();
+
+    // Real websocket control frames, delivered between application payloads.
+    for _ in 0..4 {
+        mock.publish_ping(b"journal-ping");
+        mock.publish_pong(b"journal-pong");
+    }
+    sleep(Duration::from_millis(300)).await;
+    for index in 0..6i64 {
+        assert!(mock.publish_delta(
+            "asset-control",
+            Side::Buy,
+            400_000,
+            (41 + index) * 1_000_000
+        ));
+    }
+    let expected_data_frames = data_baseline + 12;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while mock.frames_sent() < expected_data_frames && std::time::Instant::now() < deadline {
+        sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        mock.frames_sent(),
+        expected_data_frames,
+        "control frames must not count as application payloads"
+    );
+
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        mock.next_id(),
+        connection_baseline,
+        "transport controls must not force a reconnect"
+    );
+    done.notify_one();
+    let report = finish_collector(handle).await;
+
+    let status = report.journal.expect("journal status in the run report");
+    assert_eq!(status.state, journal::RunState::Finalized);
+    let run_directory = std::path::PathBuf::from(&status.run_directory);
+    let verification = journal::verify_run(&run_directory).expect("verifying the run");
+    assert!(verification.complete, "{:?}", verification.errors);
+    let records = journal::read_records(&run_directory).expect("reading journal records");
+    assert_eq!(
+        records.len() as u64,
+        mock.frames_sent(),
+        "only application payloads may be journaled"
+    );
+
+    let mut seen: BTreeMap<(String, u64), Vec<u64>> = BTreeMap::new();
+    for record in &records {
+        seen.entry((record.source.clone(), record.connection_epoch))
+            .or_default()
+            .push(record.receive_seq);
+    }
+    assert!(!seen.is_empty());
+    for sequences in seen.values() {
+        let mut expected: Vec<u64> = (1..=sequences.len() as u64).collect();
+        expected.sort_unstable();
+        let mut actual = sequences.clone();
+        actual.sort_unstable();
+        assert_eq!(
+            actual, expected,
+            "idle control frames must not leave sequence gaps"
+        );
+    }
 }
 
 /// Opt-in scale harness. Run one size at a time, for example:
