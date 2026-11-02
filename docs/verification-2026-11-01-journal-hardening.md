@@ -17,10 +17,39 @@ Gate evidence for the journal failure-path hardening on branch
   gates are recorded in
   [`verification-2026-10-30-continuity.md`](verification-2026-10-30-continuity.md).
 
+## Follow-up review closure — 2026-11-02
+
+The follow-up review of `39b2eb3446d9fb7c5d9e8e099631ec40878721e2` found
+three remaining gaps. Source commit
+`08e92bf99f7ca6f93927c09982eb5a29a685d229` (`Close journal admission,
+receive-fence, and abort review gaps`) closes them:
+
+| ID | Finding | Resolution and evidence |
+|---|---|---|
+| H1 | `record()` decremented the active-producer count and notified shutdown before latching a queue failure, so shutdown could submit `Finalize` with no observed failure | Producer admission now uses an RAII guard held through enqueue, failure latching, and counter updates. The guard is the only place the active count is decremented and shutdown is notified. Evidence: `journal::tests::shutdown_waits_for_a_producer_failure_latch` forces the post-enqueue interleaving with a test-only gate, verifies shutdown stays blocked while the producer is active, and verifies the run ends failed and cannot be verified as complete |
+| H2 | `journal_ingress` advanced `receive_seq` before checking for a payload, so transport ping/pong and payloadless protocol failures consumed journal sequence numbers without producing a record | The receive fence advances only after a payload is present, immediately before the journal record is enqueued. Evidence: `session::tests::transport_idle_and_payloadless_protocol_failures_do_not_advance_the_fence`, `ws::tests::websocket_ping_and_pong_are_reported_as_idle`, and E2E `transport_control_frames_do_not_advance_the_journal_fence` (real websocket ping/pong frames, contiguous sequences from 1, record count equal to application frames sent) |
+| H3 | `abort()` closed admission but did not wait for active producers before enqueueing `Abort`, allowing the writer to exit while a `record()` call was still active | Abort now shares the shutdown producer-quiescence helper and absolute deadline. Evidence: `journal::tests::abort_waits_for_an_active_producer_before_stopping_the_writer` releases the blocked writer while the producer is still active and verifies abort does not finish until the producer completes; the run remains incomplete (manifest `open`, no finalization) |
+
+### Follow-up gate results
+
+These are local gate results for source commit `08e92bf`.
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | Pass |
+| `cargo clippy --all-targets --locked -- -D warnings` | Pass |
+| `cargo test --all-targets --locked` | Pass: **221 library tests + 12 mock-exchange E2E tests + 2 replay integration tests = 235 passed**, 3 ignored |
+| `cargo test --doc --locked` | Pass: 0 documentation tests |
+| `cargo build --release --locked` | Pass |
+| `python3 scripts/check_architecture.py --check` | Pass: 42 Rust source files, 238 attributed test functions, 42 files reachable from crate roots, 9 structurally checked Mermaid diagrams |
+
+Both GitHub Actions workflows must still pass on the exact pushed head before
+merge; this document records the local gate only.
+
 Environment: macOS (arm64), Rust toolchain pinned by `rust-toolchain.toml`.
 The supplied FIX SBE schema and SBE output are unchanged in this work.
 
-## Audit findings closed
+## Previous review findings closed — 2026-11-01
 
 | ID | Finding | Resolution and evidence |
 |---|---|---|
@@ -28,7 +57,7 @@ The supplied FIX SBE schema and SBE output are unchanged in this work.
 | H2 | `shutdown`/`abort` used a blocking channel send for the control command, so a saturated queue with a blocked writer could exceed the configured timeout | One absolute deadline at method entry bounds producer quiescence, command delivery (`send_timeout`), the response wait, and writer-thread observation. Deadline expiry returns an error and never claims finalization. Evidence: `journal::tests::blocked_writer_bounds_shutdown`, `blocked_writer_bounds_abort`, `finalize_reply_timeout_stays_incomplete`, `repeated_concurrent_and_dead_writer_shutdowns_are_bounded` |
 | H3 | `SessionFailure::Protocol` carried no raw payload and did not advance `receive_seq`; several Kalshi branches returned transport-style idle frames after reading application payloads | Protocol is a struct variant that preserves the exact payload and receive timestamp; the worker journals every read payload through one ingress path (`journal_ingress`) that advances the fence exactly once before any decode or protocol decision; Kalshi ignored outcomes are explicit `Ignored` records with untouched bytes. Evidence: E2E `journal_accounts_for_every_delivered_payload`, `rejected_payloads_are_journaled_across_reconnects`, `exchange::kalshi::session::tests::protocol_rejection_preserves_raw_payload`, `stale_snapshot_is_reported_as_ignored_payload` |
 
-## Gate results
+## Gate results — 2026-11-01 gate
 
 | Command | Result |
 |---|---|
