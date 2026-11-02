@@ -2100,7 +2100,14 @@ async fn journal_accounts_for_every_delivered_payload() {
     mock.publish_text(&unknown);
     mock.publish_text(&control);
     mock.publish_text(&empty);
-    assert!(mock.frames_sent() > baseline);
+    let send_deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while mock.frames_sent() <= baseline && std::time::Instant::now() < send_deadline {
+        sleep(Duration::from_millis(20)).await;
+    }
+    assert!(
+        mock.frames_sent() > baseline,
+        "mock did not send the published frames before the deadline"
+    );
 
     // Let the worker drain every delivered frame before finalization. No
     // payload here triggers a reconnect, so the connection generation must be

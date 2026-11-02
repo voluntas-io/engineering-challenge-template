@@ -234,13 +234,13 @@ This is source inventory, not a claim that tests passed or that a build succeede
 | `tests/e2e_mock_exchange.rs` | `journal_finalizes_and_verifies_on_graceful_shutdown` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 1999)` | integration-test target |
 | `tests/e2e_mock_exchange.rs` | `mock_subscription_scale_across_shards` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 1830)` | integration-test target |
 | `tests/e2e_mock_exchange.rs` | `negative_control_missing_update_is_detected_by_verify` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 1767)` | integration-test target |
-| `tests/e2e_mock_exchange.rs` | `opt_in_scale_run` | `tokio::test(flavor = "multi_thread", worker_threads = 4) (line 2426)` | integration-test target |
-| `tests/e2e_mock_exchange.rs` | `rejected_payloads_are_journaled_across_reconnects` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 2207)` | integration-test target |
+| `tests/e2e_mock_exchange.rs` | `opt_in_scale_run` | `tokio::test(flavor = "multi_thread", worker_threads = 4) (line 2433)` | integration-test target |
+| `tests/e2e_mock_exchange.rs` | `rejected_payloads_are_journaled_across_reconnects` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 2214)` | integration-test target |
 | `tests/e2e_mock_exchange.rs` | `rotation_produces_a_complete_manifest_and_readable_segments` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 1934)` | integration-test target |
 | `tests/e2e_mock_exchange.rs` | `silent_subscription_is_detected_and_repaired` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 1685)` | integration-test target |
 | `tests/e2e_mock_exchange.rs` | `single_socket_loss_fails_over_and_emits_anchoring_snapshot` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 1414)` | integration-test target |
 | `tests/e2e_mock_exchange.rs` | `steady_state_history_matches_mock_exchange_truth` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 1355)` | integration-test target |
-| `tests/e2e_mock_exchange.rs` | `transport_control_frames_do_not_advance_the_journal_fence` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 2337)` | integration-test target |
+| `tests/e2e_mock_exchange.rs` | `transport_control_frames_do_not_advance_the_journal_fence` | `tokio::test(flavor = "multi_thread", worker_threads = 2) (line 2344)` | integration-test target |
 | `tests/live_polymarket.rs` | `discovers_and_subscribes_to_public_polymarket_books` | `tokio::test (line 23)` | integration-test target |
 | `tests/live_polymarket.rs` | `resubscribing_an_asset_returns_a_fresh_book` | `tokio::test (line 87)` | integration-test target |
 | `tests/replay_fixture.rs` | `replay_rejects_out_of_range_timestamps_before_serialization` | `test (line 44)` | integration-test target |
