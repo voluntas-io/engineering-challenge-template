@@ -4,6 +4,7 @@
 **Baseline:** `kj111422/engineering-challenge-template` `main` at `9ab6cd5a584fea58c0086efa50d55c796e9aac4` (2026-10-26).  
 **Primary objective:** Turn the challenge collector into a reliable Polymarket market-data, research, risk, and controlled-execution platform.  
 **Execution policy:** Public-data collection and replay are permitted by default. Private credentials and live order transmission remain disabled until the relevant gates pass.
+**Engineering charter:** [`docs/design/event-market-platform-v1/`](design/event-market-platform-v1/README.md) — target architecture, domain contracts, unified input log, deterministic replay and state-machine contracts, security boundaries, and proposed ADRs. This roadmap is the phased implementation plan and gate register that applies the charter.
 
 ## 1. Current baseline: what exists and what does not
 

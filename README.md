@@ -14,9 +14,13 @@ See the [requirement-to-test matrix](docs/requirement-test-matrix.md) and
 [final verification](docs/final-verification-2026-10-25.md) for the exact
 offline gate results.
 
-See the [Polymarket production programme](docs/production-roadmap-polymarket.md)
-for the target architecture, risk boundaries, staged implementation plan, and
-the evidence required before live order submission is enabled.
+The [Event-Market Platform engineering charter](docs/design/event-market-platform-v1/README.md)
+is the target architecture and engineering contract: canonical data model,
+unified input log and deterministic replay, state machines, security and
+operations, and proposed ADRs. The
+[Polymarket production programme](docs/production-roadmap-polymarket.md) is the
+active phased implementation plan and gate register for applying that charter.
+Neither document is a claim that live order submission is enabled.
 
 ## What it does
 
