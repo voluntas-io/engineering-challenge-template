@@ -73,10 +73,39 @@ pub enum SessionFailure {
         frame: Option<RawFrame>,
         received_at_us: i64,
     },
-    /// A decoded frame violated the exchange protocol (sequence gap, server error).
-    Protocol(anyhow::Error),
+    /// A decoded frame violated the exchange protocol (sequence gap, server
+    /// error). The raw payload is retained when one was read, so protocol
+    /// rejects are journaled exactly like decode failures.
+    Protocol {
+        error: anyhow::Error,
+        frame: Option<RawFrame>,
+        received_at_us: i64,
+    },
     /// Configuration or authentication failure: retrying cannot help.
     Fatal(anyhow::Error),
+}
+
+impl SessionFailure {
+    /// A protocol violation observed before any payload was read (for
+    /// example, a pending-command acknowledgement timeout).
+    #[must_use]
+    pub fn protocol(error: anyhow::Error) -> Self {
+        Self::Protocol {
+            error,
+            frame: None,
+            received_at_us: crate::time::now_us().unwrap_or(0),
+        }
+    }
+
+    /// A protocol violation with the exact payload that triggered it.
+    #[must_use]
+    pub fn protocol_with_frame(error: anyhow::Error, frame: RawFrame, received_at_us: i64) -> Self {
+        Self::Protocol {
+            error,
+            frame: Some(frame),
+            received_at_us,
+        }
+    }
 }
 
 impl From<anyhow::Error> for SessionFailure {
@@ -237,7 +266,7 @@ pub async fn run_worker(
                         .await;
                     break;
                 }
-                SessionFailure::Reconnect(error) | SessionFailure::Protocol(error) => {
+                SessionFailure::Reconnect(error) | SessionFailure::Protocol { error, .. } => {
                     warn!(%source, error = %format!("{error:#}"), "connect failed");
                     status.last_error = Some(truncate_error(&error));
                     status.connected = false;
@@ -421,43 +450,32 @@ pub async fn run_worker(
                 frame = read_next_frame(&mut session) => {
                     match frame {
                         Ok(mut frame) => {
-                            receive_seq = receive_seq.saturating_add(1);
+                            let received_at_us = frame.received_at_us.unwrap_or_else(|| {
+                                now_us().unwrap_or(0)
+                            });
+                            // One payload read, one fence advance, one journal
+                            // record — before any decode or protocol decision.
+                            if !journal_ingress(
+                                source,
+                                connection_epoch,
+                                &mut receive_seq,
+                                &mut status,
+                                config.journal.as_ref(),
+                                &events,
+                                frame.raw.take(),
+                                received_at_us,
+                                frame.decode.clone(),
+                            )
+                            .await
+                            {
+                                should_stop = true;
+                                break;
+                            }
                             stamp_frame(&mut frame, connection_epoch, receive_seq);
                             status.messages = status.messages.saturating_add(1);
-                            status.bytes_received =
-                                status.bytes_received.saturating_add(frame.bytes as u64);
                             status.last_frame_us = now_us().ok();
                             idle_deadline = Instant::now() + config.idle_timeout;
                             update_latency(&mut status, &frame.events);
-                            if let Some(journal) = config.journal.as_ref()
-                                && let Some(raw) = frame.raw.take()
-                            {
-                                let received_at_us = frame.received_at_us.unwrap_or_else(|| {
-                                    now_us().unwrap_or(0)
-                                });
-                                if let Err(error) = journal.record(
-                                    source,
-                                    connection_epoch,
-                                    receive_seq,
-                                    received_at_us,
-                                    raw,
-                                    frame.decode.clone(),
-                                ) {
-                                    let message = format!(
-                                        "raw-frame journal rejected a frame: {error:#}"
-                                    );
-                                    warn!(%source, error = %message, "journal write failed");
-                                    status.last_error = Some(truncate_error(&error));
-                                    let _ = events
-                                        .send(WorkerEvent::Fatal {
-                                            source,
-                                            error: message,
-                                        })
-                                        .await;
-                                    should_stop = true;
-                                    break;
-                                }
-                            }
                             if !frame.events.is_empty()
                                 && events
                                     .send(WorkerEvent::Events {
@@ -487,49 +505,57 @@ pub async fn run_worker(
                                     received_at_us,
                                 } => {
                                     warn!(%source, error = %format!("{error:#}"), "websocket decode failed");
-                                    // The frame was read; advance the receive
-                                    // fence before decoding hid it so recovery
-                                    // ordering and the journal stay monotonic.
-                                    receive_seq = receive_seq.saturating_add(1);
                                     status.messages = status.messages.saturating_add(1);
                                     status.decode_errors = status.decode_errors.saturating_add(1);
                                     status.last_error = Some(truncate_error(&error));
-                                    if let Some(journal) = config.journal.as_ref()
-                                        && let Some(raw) = frame
+                                    // The payload is journaled with its stable
+                                    // rejection category even though decoding
+                                    // failed.
+                                    if !journal_ingress(
+                                        source,
+                                        connection_epoch,
+                                        &mut receive_seq,
+                                        &mut status,
+                                        config.journal.as_ref(),
+                                        &events,
+                                        frame,
+                                        received_at_us,
+                                        DecodeOutcome::rejected(decode_error_category(&error)),
+                                    )
+                                    .await
                                     {
-                                        status.bytes_received = status
-                                            .bytes_received
-                                            .saturating_add(raw.payload.len() as u64);
-                                        let category = decode_error_category(&error);
-                                        if let Err(journal_error) = journal.record(
-                                            source,
-                                            connection_epoch,
-                                            receive_seq,
-                                            received_at_us,
-                                            raw,
-                                            crate::journal::DecodeOutcome::rejected(category),
-                                        ) {
-                                            let message = format!(
-                                                "raw-frame journal rejected a frame: {journal_error:#}"
-                                            );
-                                            warn!(%source, error = %message, "journal write failed");
-                                            status.last_error = Some(truncate_error(&journal_error));
-                                            let _ = events
-                                                .send(WorkerEvent::Fatal {
-                                                    source,
-                                                    error: message,
-                                                })
-                                                .await;
-                                            should_stop = true;
-                                            break;
-                                        }
+                                        should_stop = true;
+                                        break;
                                     }
                                     must_reconnect = true;
                                 }
-                                SessionFailure::Protocol(error) => {
+                                SessionFailure::Protocol {
+                                    error,
+                                    frame,
+                                    received_at_us,
+                                } => {
                                     warn!(%source, error = %format!("{error:#}"), "websocket protocol error");
                                     status.protocol_errors = status.protocol_errors.saturating_add(1);
                                     status.last_error = Some(truncate_error(&error));
+                                    // A protocol reject is still a payload the
+                                    // exchange sent: it advances the fence and
+                                    // is journaled with its exact bytes.
+                                    if !journal_ingress(
+                                        source,
+                                        connection_epoch,
+                                        &mut receive_seq,
+                                        &mut status,
+                                        config.journal.as_ref(),
+                                        &events,
+                                        frame,
+                                        received_at_us,
+                                        DecodeOutcome::rejected("protocol_violation"),
+                                    )
+                                    .await
+                                    {
+                                        should_stop = true;
+                                        break;
+                                    }
                                     must_reconnect = true;
                                 }
                                 SessionFailure::Reconnect(error) => {
@@ -827,10 +853,61 @@ fn update_latency(status: &mut SourceStatus, events: &[ExchangeEvent]) {
 fn failure_message(failure: &SessionFailure) -> String {
     match failure {
         SessionFailure::Reconnect(error)
-        | SessionFailure::Protocol(error)
+        | SessionFailure::Protocol { error, .. }
         | SessionFailure::Fatal(error) => truncate_error(error),
         SessionFailure::Decode { error, .. } => truncate_error(error),
     }
+}
+
+/// Account for one transport payload at the single ingress boundary.
+///
+/// Advances the receive fence exactly once per payload read — before any
+/// decode or protocol decision is recorded — and enqueues the exact bytes with
+/// their decode outcome. Transport-level idle events carry no payload: they
+/// neither advance the fence nor produce a journal record. Returns `false`
+/// after a fatal journal error that must stop the worker.
+#[allow(clippy::too_many_arguments)]
+async fn journal_ingress(
+    source: SourceId,
+    connection_epoch: u64,
+    receive_seq: &mut u64,
+    status: &mut SourceStatus,
+    journal: Option<&JournalHandle>,
+    events: &mpsc::Sender<WorkerEvent>,
+    payload: Option<RawFrame>,
+    received_at_us: i64,
+    decode: DecodeOutcome,
+) -> bool {
+    let Some(payload) = payload else {
+        return true;
+    };
+    *receive_seq = receive_seq.saturating_add(1);
+    status.bytes_received = status
+        .bytes_received
+        .saturating_add(payload.payload.len() as u64);
+    let Some(journal) = journal else {
+        return true;
+    };
+    if let Err(error) = journal.record(
+        source,
+        connection_epoch,
+        *receive_seq,
+        received_at_us,
+        payload,
+        decode,
+    ) {
+        let message = format!("raw-frame journal rejected a frame: {error:#}");
+        warn!(%source, error = %message, "journal write failed");
+        status.last_error = Some(truncate_error(&error));
+        let _ = events
+            .send(WorkerEvent::Fatal {
+                source,
+                error: message,
+            })
+            .await;
+        return false;
+    }
+    true
 }
 
 /// Stable classification for a rejected frame, recorded in the journal.
@@ -874,6 +951,120 @@ mod tests {
         let message = truncate_error(&error);
         assert!(message.ends_with('…'));
         assert!(message.len() <= 512 + '…'.len_utf8());
+    }
+
+    fn test_journal(root: &std::path::Path) -> JournalHandle {
+        use crate::journal::{JournalConfig, JournalMeta, SyncMode};
+
+        JournalHandle::start(
+            JournalConfig {
+                directory: root.to_path_buf(),
+                queue_capacity: 16,
+                enqueue_timeout: Duration::from_millis(250),
+                flush_interval: Duration::from_millis(10),
+                sync_interval: Duration::from_millis(20),
+                segment_max_bytes: 0,
+                segment_max_seconds: 0,
+                sync_mode: SyncMode::Interval,
+            },
+            JournalMeta {
+                run_id: "run".to_owned(),
+                venue: "test".to_owned(),
+                code_commit: "test".to_owned(),
+                config_sha256: "test".to_owned(),
+            },
+        )
+        .expect("journal start")
+    }
+
+    #[tokio::test]
+    async fn transport_idle_and_payloadless_protocol_failures_do_not_advance_the_fence() {
+        let temp = tempfile::TempDir::new().expect("tempdir");
+        let handle = test_journal(&temp.path().join("journal"));
+        let source = SourceId::new(0, 0);
+        let (events, _events_rx) = mpsc::channel(4);
+        let mut status = SourceStatus::new(source);
+        let mut receive_seq = 0u64;
+
+        // A transport ping/pong produces an idle session frame with no raw
+        // payload. It must not consume a journal sequence number.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                None,
+                1,
+                DecodeOutcome::default(),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 0);
+
+        // A protocol failure observed before any payload was read has no
+        // associated record and must not advance the fence either.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                None,
+                2,
+                DecodeOutcome::rejected("protocol_violation"),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 0);
+
+        // The first actual payload takes sequence 1, not 3.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                Some(RawFrame::text("payload".to_owned())),
+                3,
+                DecodeOutcome::decoded(1),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 1);
+
+        // An idle frame after a payload leaves the fence where it was.
+        assert!(
+            journal_ingress(
+                source,
+                1,
+                &mut receive_seq,
+                &mut status,
+                Some(&handle),
+                &events,
+                None,
+                4,
+                DecodeOutcome::default(),
+            )
+            .await
+        );
+        assert_eq!(receive_seq, 1);
+
+        let summary = handle
+            .shutdown(Duration::from_secs(2))
+            .expect("journal shutdown");
+        assert_eq!(summary.record_count, 1);
+        let records = crate::journal::read_records(std::path::Path::new(&summary.run_directory))
+            .expect("read records");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].receive_seq, 1);
+        assert_eq!(records[0].payload, b"payload");
     }
 
     #[tokio::test]

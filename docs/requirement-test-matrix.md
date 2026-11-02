@@ -6,7 +6,9 @@ The public-network test is separate and ignored unless `RUN_LIVE_TESTS=1` is set
 Gate evidence for the submitted baseline is recorded in
 [`final-verification-2026-10-25.md`](final-verification-2026-10-25.md);
 this branch's results are recorded in
-[`verification-2026-10-30-continuity.md`](verification-2026-10-30-continuity.md).
+[`verification-2026-10-30-continuity.md`](verification-2026-10-30-continuity.md)
+and in
+[`verification-2026-11-01-journal-hardening.md`](verification-2026-11-01-journal-hardening.md).
 
 ## Mandatory requirements
 
@@ -30,7 +32,7 @@ this branch's results are recorded in
 | E2 | Subscription monitoring; resubscribe quiet symbols; periodic reconnect | Idle timeout, stale probes (subscription cycling on the live Polymarket connection), probe-budget reconnect, periodic refresh with jitter | E2E `silent_subscription_is_detected_and_repaired` (takes about 12 s because the test sets `stale_probe_after_secs = 10`); `exchange::polymarket::session::tests::request_snapshot_cycles_the_subscription_on_the_live_connection`; `collector::state::tests::{shadow_snapshot_does_not_reset_active_probe_state,stale_shadow_snapshot_does_not_emit_after_source_loss}`; `exchange::kalshi::session::tests::*` | Implemented and offline-verified |
 | E3 | Generic encode/decode per exchange | `Exchange`, `MarketDataSession`, `SessionFactory`; Kalshi and Polymarket adapters behind the same core | Codec/discovery tests for both exchanges; replay fixture; E2E exercises the Polymarket discovery and session adapters through the coordinator | Implemented and offline-verified |
 | E4 | Latency experiments written in markdown | `src/latency.rs`, `src/ws.rs`, `docs/latency.md`; `TCP_NODELAY`, source binding, full-handshake racing, cross-connection skew | `latency::tests::*`, `ws::tests::{default_connect_options_disable_nagle_and_do_not_race,pinned_source_ports_are_derived_per_connection,ephemeral_ports_ignore_the_ordinal}`; four checked-in 60-second observations | Implemented; four single observations, not a benchmark or causal proof |
-| E5 | Versioned raw-frame journal with durability and verification | `src/journal.rs`; coordinator startup/finalization; `journal.directory`; `journal verify` | `journal::tests::*`, E2E `journal_finalizes_and_verifies_on_graceful_shutdown`, full existing SBE suite | Implemented and offline-verified; no live journal soak, retention policy, or physical disk-exhaustion test |
+| E5 | Versioned raw-frame journal with durability and verification | `src/journal.rs`; coordinator startup/finalization; `journal.directory`; `journal verify` | `journal::tests::*` (saturation through the production shutdown path, producer races, bounded shutdown/abort, counter reconciliation), E2E `journal_finalizes_and_verifies_on_graceful_shutdown`, E2E `journal_accounts_for_every_delivered_payload`, E2E `rejected_payloads_are_journaled_across_reconnects`, full existing SBE suite | Implemented and offline-verified; no live journal soak, retention policy, or physical disk-exhaustion test |
 
 ## Cross-cutting evidence
 
@@ -48,6 +50,8 @@ this branch's results are recorded in
 | Subscription scale is tested beyond discovery | E2E `mock_subscription_scale_across_shards` | 1,000 symbols, 4 shards, 2 replicas, 8 loopback WebSockets, 250 symbols per socket, 2,000 subscription entries. It does not establish live venue limits or 548,942 simultaneous subscriptions. |
 | Scale envelope measured at 1k/5k/25k/100k symbols | E2E `opt_in_scale_run` (ignored; run with `SCALE_SYMBOLS=N`) | Measured connect+subscribe, anchor, settle times, RSS, output bytes. 100k: 20 shards, 40 connections, 200k subscriptions, 5.0s total, 696 MB RSS. Does not establish live venue limits or full-universe 548,942 tokens. |
 | Raw frames survive, verify, and fail without dropping | `journal::tests::*`; E2E `journal_finalizes_and_verifies_on_graceful_shutdown` | Exact payloads, checksums, manifest, per-source order, queue saturation, write/sync/finalize faults, truncation, corruption, and partial shutdown are covered offline. The SBE output is unchanged. It does not establish live journal throughput or retention behavior. |
+| A latched journal failure is terminal and finalization stays bounded | `journal::tests::queue_saturation_then_shutdown_stays_failed`, `concurrent_producers_stop_after_failure`, `blocked_writer_bounds_shutdown`, `blocked_writer_bounds_abort`, `finalize_reply_timeout_stays_incomplete`, `repeated_concurrent_and_dead_writer_shutdowns_are_bounded` | Saturation through the production `shutdown` path leaves the run failed with `verify` incomplete; producers reject after the latch; every shutdown/abort phase is bounded by one deadline. It does not prove behavior under a kernel-stuck write longer than the test's fault hook. |
+| Every application payload read is journaled exactly once | E2E `journal_accounts_for_every_delivered_payload`; E2E `rejected_payloads_are_journaled_across_reconnects`; `exchange::kalshi::session::tests::{protocol_rejection_preserves_raw_payload,stale_snapshot_is_reported_as_ignored_payload}` | Sent == journaled with contiguous per-source sequences for a stable connection; malformed/binary rejections and ignored outcomes keep exact bytes across reconnect generations. Transport-level idle events are out of scope; a frame written during socket teardown is a transport loss, not journal accounting. |
 
 ## Not claimed
 
@@ -63,6 +67,9 @@ this branch's results are recorded in
   observations. Source-port/CDN hashing and Nagle/delayed-ACK explanations are
   hypotheses, not isolated mechanisms.
 - **Live journal durability.** The raw-frame journal is verified by deterministic
-  fault injection and mock-exchange scenarios. It has not been soaked on a live
-  feed, filled a physical disk, or exercised a power-loss boundary; retention and
-  disk-watermark policies are not implemented.
+  fault injection and mock-exchange scenarios, including a latched
+  failure-state contract, deadline-bounded shutdown, and exact per-payload
+  ingress accounting. It has not been soaked on a live feed, filled a physical
+  disk, or exercised a power-loss boundary; retention and disk-watermark
+  policies are not implemented. A checksum-valid journal proves the integrity
+  of recorded payloads, not that the venue delivered every event.

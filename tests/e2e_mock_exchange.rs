@@ -318,6 +318,25 @@ struct SubscriptionFrame {
     initial: bool,
 }
 
+#[derive(Clone)]
+enum RawMockFrame {
+    Text(String),
+    Binary(Vec<u8>),
+    Ping(Vec<u8>),
+    Pong(Vec<u8>),
+}
+
+impl From<RawMockFrame> for Outbound {
+    fn from(value: RawMockFrame) -> Self {
+        match value {
+            RawMockFrame::Text(text) => Self::Text(text),
+            RawMockFrame::Binary(bytes) => Self::Binary(bytes),
+            RawMockFrame::Ping(bytes) => Self::Ping(bytes),
+            RawMockFrame::Pong(bytes) => Self::Pong(bytes),
+        }
+    }
+}
+
 struct Connection {
     subscribed: BTreeSet<String>,
     outbound: mpsc::UnboundedSender<Outbound>,
@@ -328,6 +347,9 @@ struct Connection {
 
 enum Outbound {
     Text(String),
+    Binary(Vec<u8>),
+    Ping(Vec<u8>),
+    Pong(Vec<u8>),
     Close,
 }
 
@@ -338,6 +360,9 @@ struct MockState {
     connections: Mutex<BTreeMap<u64, Connection>>,
     subscription_log: Mutex<Vec<SubscriptionFrame>>,
     next_id: AtomicU64,
+    /// Application text/binary frames written to any socket. Every frame sent
+    /// here must later appear in the raw-frame journal exactly once.
+    frames_sent: AtomicU64,
     reject_connections: AtomicBool,
     suppress_deltas: AtomicBool,
     gate_second: bool,
@@ -354,10 +379,32 @@ impl MockState {
             connections: Mutex::new(BTreeMap::new()),
             subscription_log: Mutex::new(Vec::new()),
             next_id: AtomicU64::new(0),
+            frames_sent: AtomicU64::new(0),
             reject_connections: AtomicBool::new(false),
             suppress_deltas: AtomicBool::new(false),
             gate_second,
             shutdown,
+        }
+    }
+
+    fn frames_sent(&self) -> u64 {
+        self.frames_sent.load(Ordering::SeqCst)
+    }
+
+    /// Push one raw application payload to every connection that completed
+    /// its initial dump. Used to deliver malformed, unknown, and control
+    /// payloads the collector must still journal.
+    fn publish_raw(&self, payload: RawMockFrame) {
+        let targets: Vec<mpsc::UnboundedSender<Outbound>> = self
+            .connections
+            .lock()
+            .expect("connections lock")
+            .values()
+            .filter(|connection| connection.initial_dump_sent)
+            .map(|connection| connection.outbound.clone())
+            .collect();
+        for target in targets {
+            let _ = target.send(Outbound::from(payload.clone()));
         }
     }
 
@@ -743,6 +790,26 @@ impl MockExchange {
         self.state.publish_delta(token, side, price, quantity)
     }
 
+    fn frames_sent(&self) -> u64 {
+        self.state.frames_sent()
+    }
+
+    fn publish_text(&self, text: &str) {
+        self.state.publish_raw(RawMockFrame::Text(text.to_owned()));
+    }
+
+    fn publish_binary(&self, bytes: &[u8]) {
+        self.state.publish_raw(RawMockFrame::Binary(bytes.to_vec()));
+    }
+
+    fn publish_ping(&self, payload: &[u8]) {
+        self.state.publish_raw(RawMockFrame::Ping(payload.to_vec()));
+    }
+
+    fn publish_pong(&self, payload: &[u8]) {
+        self.state.publish_raw(RawMockFrame::Pong(payload.to_vec()));
+    }
+
     fn delivered_updates_for(&self, token: &str) -> Vec<MockUpdate> {
         self.state.delivered_updates_for(token)
     }
@@ -837,6 +904,34 @@ impl MockExchange {
             },
         )
         .await;
+    }
+
+    /// Block until the connection set holds steady: `count` live connections
+    /// and no replacement for 400ms. Publishing a frame while a replacement
+    /// is landing would write it into a doomed socket, so payload-publishing
+    /// tests must wait for stability first.
+    async fn wait_for_stable_connections(&self, count: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let mut stable_since: Option<std::time::Instant> = None;
+        let mut last_id = self.state.next_id();
+        while std::time::Instant::now() < deadline {
+            sleep(Duration::from_millis(50)).await;
+            let id = self.state.next_id();
+            if id != last_id {
+                last_id = id;
+                stable_since = None;
+                continue;
+            }
+            if self.state.connection_count() < count || self.state.total_subscriptions() < count {
+                stable_since = None;
+                continue;
+            }
+            let since = stable_since.get_or_insert(std::time::Instant::now());
+            if since.elapsed() >= Duration::from_millis(400) {
+                return;
+            }
+        }
+        panic!("collector connections never stabilized");
     }
 }
 
@@ -948,6 +1043,7 @@ async fn handle_connection(id: u64, socket: TcpStream, state: Arc<MockState>) {
                                 state.unregister(id);
                                 return;
                             }
+                            state.frames_sent.fetch_add(1, Ordering::SeqCst);
                         }
                     }
                     Some(Ok(Message::Ping(payload))) => {
@@ -962,6 +1058,23 @@ async fn handle_connection(id: u64, socket: TcpStream, state: Arc<MockState>) {
                 match outbound {
                     Some(Outbound::Text(frame)) => {
                         if sink.send(Message::Text(frame.into())).await.is_err() {
+                            break;
+                        }
+                        state.frames_sent.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Some(Outbound::Binary(bytes)) => {
+                        if sink.send(Message::Binary(bytes.into())).await.is_err() {
+                            break;
+                        }
+                        state.frames_sent.fetch_add(1, Ordering::SeqCst);
+                    }
+                    Some(Outbound::Ping(bytes)) => {
+                        if sink.send(Message::Ping(bytes.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                    Some(Outbound::Pong(bytes)) => {
+                        if sink.send(Message::Pong(bytes.into())).await.is_err() {
                             break;
                         }
                     }
@@ -1950,7 +2063,364 @@ async fn journal_finalizes_and_verifies_on_graceful_shutdown() {
     assert!(price_change_payloads >= 120);
 }
 
-/// Opt-in scale harness. Run one size at a time, for example:///
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn journal_accounts_for_every_delivered_payload() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let output = directory.path().join("journal-ingress.sbe");
+    let journal_root = directory.path().join("journal");
+    let mock = MockExchange::start(vec![market("cond-ingress", "asset-ingress")], false).await;
+    mock.set_book(
+        "asset-ingress",
+        &[(410_000, 7_000_000)],
+        &[(590_000, 3_000_000)],
+    );
+    let mut settings = test_settings(&mock, &output);
+    settings.journal.directory = Some(journal_root.clone());
+    let done = Arc::new(Notify::new());
+    let handle = spawn_collector(settings, Arc::clone(&done));
+
+    mock.wait_for_total_subscriptions(2).await;
+    mock.wait_for_stable_connections(2).await;
+    let connection_baseline = mock.next_id();
+    let baseline = mock.frames_sent();
+    for index in 0..10i64 {
+        assert!(mock.publish_delta(
+            "asset-ingress",
+            Side::Buy,
+            410_000,
+            (21 + index) * 1_000_000
+        ));
+    }
+
+    // Payloads the adapter accepts but does not act on must still be
+    // journaled with an explicit ignored outcome. None of these disconnect.
+    let unknown = r#"{"event_type":"future_event","asset_id":"asset-ingress"}"#.to_owned();
+    let control = "PONG".to_owned();
+    let empty = "   ".to_owned();
+    mock.publish_text(&unknown);
+    mock.publish_text(&control);
+    mock.publish_text(&empty);
+    assert!(mock.frames_sent() > baseline);
+
+    // Let the worker drain every delivered frame before finalization. No
+    // payload here triggers a reconnect, so the connection generation must be
+    // unchanged: that is what makes the strict sent-versus-journaled equality
+    // valid.
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        mock.next_id(),
+        connection_baseline,
+        "an unexpected reconnect invalidates the exact-count scenario"
+    );
+    done.notify_one();
+    let report = finish_collector(handle).await;
+
+    let status = report.journal.expect("journal status in the run report");
+    assert_eq!(status.state, journal::RunState::Finalized);
+    assert!(status.last_error.is_none());
+
+    let run_directory = std::path::PathBuf::from(&status.run_directory);
+    let verification = journal::verify_run(&run_directory).expect("verifying the run");
+    assert!(verification.complete, "{:?}", verification.errors);
+
+    let records = journal::read_records(&run_directory).expect("reading journal records");
+    assert_eq!(
+        records.len() as u64,
+        mock.frames_sent(),
+        "every application payload the mock delivered must be journaled exactly once"
+    );
+    assert_eq!(verification.record_count, status.counters.finalized);
+
+    // Exactly one fence advance per payload: sequences are contiguous from 1
+    // within every (source, connection epoch).
+    let mut seen: BTreeMap<(String, u64), Vec<u64>> = BTreeMap::new();
+    for record in &records {
+        seen.entry((record.source.clone(), record.connection_epoch))
+            .or_default()
+            .push(record.receive_seq);
+    }
+    assert!(!seen.is_empty());
+    for sequences in seen.values() {
+        let mut expected: Vec<u64> = (1..=sequences.len() as u64).collect();
+        expected.sort_unstable();
+        let mut actual = sequences.clone();
+        actual.sort_unstable();
+        assert_eq!(actual, expected, "sequences must advance exactly once");
+    }
+
+    let find = |needle: &[u8]| {
+        records
+            .iter()
+            .find(|record| record.payload.as_slice() == needle)
+            .unwrap_or_else(|| panic!("missing journaled payload {needle:?}"))
+    };
+    assert!(matches!(
+        find(unknown.as_bytes()).outcome,
+        journal::DecodeOutcome::Ignored { .. }
+    ));
+    let control_record = find(control.as_bytes());
+    assert!(
+        matches!(
+            control_record.outcome,
+            journal::DecodeOutcome::Ignored { ref reason } if reason == "control_frame"
+        ),
+        "control text must be recorded as ignored: {:?}",
+        control_record.outcome
+    );
+    let empty_record = find(empty.as_bytes());
+    assert!(
+        matches!(
+            empty_record.outcome,
+            journal::DecodeOutcome::Ignored { ref reason } if reason == "empty_frame"
+        ),
+        "an empty frame must be recorded as ignored: {:?}",
+        empty_record.outcome
+    );
+
+    let price_changes = records
+        .iter()
+        .filter(|record| {
+            serde_json::from_slice::<Value>(&record.payload)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("event_type")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .as_deref()
+                == Some("price_change")
+        })
+        .count();
+    assert_eq!(
+        price_changes, 20,
+        "both replicas must journal every delivered delta exactly once"
+    );
+}
+
+/// A payload that decoding rejects is journaled with its exact bytes before
+/// the reconnect it triggers, and the receive fence advances exactly once per
+/// read payload across connection generations. A frame the mock writes at the
+/// moment a replica tears its socket down is a transport loss, not a journal
+/// accounting failure, so this scenario asserts per-payload guarantees rather
+/// than a strict sent-versus-journaled count.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn rejected_payloads_are_journaled_across_reconnects() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let output = directory.path().join("journal-reject.sbe");
+    let journal_root = directory.path().join("journal");
+    let mock = MockExchange::start(vec![market("cond-reject", "asset-reject")], false).await;
+    mock.set_book(
+        "asset-reject",
+        &[(420_000, 6_000_000)],
+        &[(580_000, 4_000_000)],
+    );
+    let mut settings = test_settings(&mock, &output);
+    settings.journal.directory = Some(journal_root.clone());
+    let done = Arc::new(Notify::new());
+    let handle = spawn_collector(settings, Arc::clone(&done));
+
+    mock.wait_for_total_subscriptions(2).await;
+    sleep(Duration::from_millis(200)).await;
+
+    // A malformed payload is journaled as rejected before the reconnect it
+    // triggers.
+    let malformed = "{not json".to_owned();
+    mock.publish_text(&malformed);
+    let first_generation = mock.next_id();
+    mock.wait_for_new_connections(first_generation, 2).await;
+    mock.wait_for_total_subscriptions(2).await;
+    sleep(Duration::from_millis(300)).await;
+
+    // A binary payload is rejected by the UTF-8 decode boundary.
+    let binary = vec![0u8, 159, 146, 150, 255];
+    mock.publish_binary(&binary);
+    let second_generation = mock.next_id();
+    mock.wait_for_new_connections(second_generation, 2).await;
+    mock.wait_for_total_subscriptions(2).await;
+    sleep(Duration::from_millis(300)).await;
+
+    // Deltas on the settled final generation: every one of them must be
+    // journaled by both replicas.
+    mock.wait_for_stable_connections(2).await;
+    for index in 0..5i64 {
+        assert!(mock.publish_delta("asset-reject", Side::Buy, 420_000, (31 + index) * 1_000_000));
+    }
+
+    // Let the worker drain the settled generation before finalization.
+    sleep(Duration::from_secs(1)).await;
+
+    done.notify_one();
+    let report = finish_collector(handle).await;
+
+    let status = report.journal.expect("journal status in the run report");
+    assert_eq!(status.state, journal::RunState::Finalized);
+    let run_directory = std::path::PathBuf::from(&status.run_directory);
+    let verification = journal::verify_run(&run_directory).expect("verifying the run");
+    assert!(verification.complete, "{:?}", verification.errors);
+    let records = journal::read_records(&run_directory).expect("reading journal records");
+
+    let malformed_records: Vec<_> = records
+        .iter()
+        .filter(|record| record.payload.as_slice() == malformed.as_bytes())
+        .collect();
+    assert!(
+        !malformed_records.is_empty(),
+        "the malformed payload must be journaled"
+    );
+    for record in &malformed_records {
+        assert!(matches!(
+            record.outcome,
+            journal::DecodeOutcome::Rejected { .. }
+        ));
+    }
+    let binary_records: Vec<_> = records
+        .iter()
+        .filter(|record| record.payload == binary)
+        .collect();
+    assert!(
+        !binary_records.is_empty(),
+        "the binary payload must be journaled"
+    );
+    for record in &binary_records {
+        assert_eq!(record.frame_kind, journal::FrameKind::Binary);
+        assert!(matches!(
+            record.outcome,
+            journal::DecodeOutcome::Rejected { .. }
+        ));
+    }
+
+    // Every payload that was read advanced the fence exactly once, across
+    // every connection generation.
+    let mut seen: BTreeMap<(String, u64), Vec<u64>> = BTreeMap::new();
+    for record in &records {
+        seen.entry((record.source.clone(), record.connection_epoch))
+            .or_default()
+            .push(record.receive_seq);
+    }
+    assert!(
+        seen.iter().any(|((_, epoch), _)| *epoch > 1),
+        "a reconnect generation must appear in the journal"
+    );
+    for sequences in seen.values() {
+        let mut expected: Vec<u64> = (1..=sequences.len() as u64).collect();
+        expected.sort_unstable();
+        let mut actual = sequences.clone();
+        actual.sort_unstable();
+        assert_eq!(actual, expected, "sequences must advance exactly once");
+    }
+
+    let price_changes = records
+        .iter()
+        .filter(|record| {
+            serde_json::from_slice::<Value>(&record.payload)
+                .ok()
+                .and_then(|value| {
+                    value
+                        .get("event_type")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
+                .as_deref()
+                == Some("price_change")
+        })
+        .count();
+    assert_eq!(
+        price_changes, 10,
+        "both replicas must journal every delta delivered before the reconnects"
+    );
+}
+
+/// Transport-level ping/pong frames carry no application payload. They must
+/// neither create journal records nor consume receive sequence numbers; only
+/// the data frames around them advance the fence.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn transport_control_frames_do_not_advance_the_journal_fence() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let output = directory.path().join("journal-control.sbe");
+    let journal_root = directory.path().join("journal");
+    let mock = MockExchange::start(vec![market("cond-control", "asset-control")], false).await;
+    mock.set_book(
+        "asset-control",
+        &[(400_000, 8_000_000)],
+        &[(600_000, 2_000_000)],
+    );
+    let mut settings = test_settings(&mock, &output);
+    settings.journal.directory = Some(journal_root.clone());
+    let done = Arc::new(Notify::new());
+    let handle = spawn_collector(settings, Arc::clone(&done));
+
+    mock.wait_for_total_subscriptions(2).await;
+    mock.wait_for_stable_connections(2).await;
+    let connection_baseline = mock.next_id();
+    let data_baseline = mock.frames_sent();
+
+    // Real websocket control frames, delivered between application payloads.
+    for _ in 0..4 {
+        mock.publish_ping(b"journal-ping");
+        mock.publish_pong(b"journal-pong");
+    }
+    sleep(Duration::from_millis(300)).await;
+    for index in 0..6i64 {
+        assert!(mock.publish_delta(
+            "asset-control",
+            Side::Buy,
+            400_000,
+            (41 + index) * 1_000_000
+        ));
+    }
+    let expected_data_frames = data_baseline + 12;
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while mock.frames_sent() < expected_data_frames && std::time::Instant::now() < deadline {
+        sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        mock.frames_sent(),
+        expected_data_frames,
+        "control frames must not count as application payloads"
+    );
+
+    sleep(Duration::from_secs(1)).await;
+    assert_eq!(
+        mock.next_id(),
+        connection_baseline,
+        "transport controls must not force a reconnect"
+    );
+    done.notify_one();
+    let report = finish_collector(handle).await;
+
+    let status = report.journal.expect("journal status in the run report");
+    assert_eq!(status.state, journal::RunState::Finalized);
+    let run_directory = std::path::PathBuf::from(&status.run_directory);
+    let verification = journal::verify_run(&run_directory).expect("verifying the run");
+    assert!(verification.complete, "{:?}", verification.errors);
+    let records = journal::read_records(&run_directory).expect("reading journal records");
+    assert_eq!(
+        records.len() as u64,
+        mock.frames_sent(),
+        "only application payloads may be journaled"
+    );
+
+    let mut seen: BTreeMap<(String, u64), Vec<u64>> = BTreeMap::new();
+    for record in &records {
+        seen.entry((record.source.clone(), record.connection_epoch))
+            .or_default()
+            .push(record.receive_seq);
+    }
+    assert!(!seen.is_empty());
+    for sequences in seen.values() {
+        let mut expected: Vec<u64> = (1..=sequences.len() as u64).collect();
+        expected.sort_unstable();
+        let mut actual = sequences.clone();
+        actual.sort_unstable();
+        assert_eq!(
+            actual, expected,
+            "idle control frames must not leave sequence gaps"
+        );
+    }
+}
+
+/// Opt-in scale harness. Run one size at a time, for example:
 /// `SCALE_SYMBOLS=5000 SCALE_REPORT=measurements/scale-5000.json \
 ///  cargo test --release --test e2e_mock_exchange opt_in_scale_run -- --ignored --nocapture`
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

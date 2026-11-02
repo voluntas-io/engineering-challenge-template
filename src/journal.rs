@@ -47,7 +47,7 @@ use std::{
     io::{BufWriter, Read, Write},
     path::{Path, PathBuf},
     sync::{
-        Arc, Mutex,
+        Arc, Condvar, Mutex,
         mpsc::{Sender, channel},
     },
     thread::JoinHandle,
@@ -325,6 +325,42 @@ struct Inner {
     queue: QueueSender<Command>,
     join: Mutex<Option<JoinHandle<()>>>,
     shutdown: Mutex<bool>,
+    admission: Mutex<Admission>,
+    admission_cv: Condvar,
+    #[cfg(test)]
+    record_hook: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+}
+
+/// Producer admission control. Closing admission before finalization prevents a
+/// record from entering the queue behind the Finalize command.
+struct Admission {
+    accepting: bool,
+    active: usize,
+}
+
+/// Keeps a producer counted as active until the whole record operation —
+/// enqueue, failure latching, and counter updates — has completed.
+///
+/// Dropping the guard is the only place that decrements the active producer
+/// count, so shutdown and abort cannot observe quiescence while a producer is
+/// still about to mark the journal failed.
+struct AdmissionGuard<'a> {
+    inner: &'a Inner,
+}
+
+impl Drop for AdmissionGuard<'_> {
+    fn drop(&mut self) {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        debug_assert!(admission.active > 0, "producer admission count underflowed");
+        admission.active = admission.active.saturating_sub(1);
+        if admission.active == 0 {
+            self.inner.admission_cv.notify_all();
+        }
+    }
 }
 
 /// Cloneable handle to the journal writer.
@@ -390,6 +426,13 @@ impl JournalHandle {
             queue,
             join: Mutex::new(None),
             shutdown: Mutex::new(false),
+            admission: Mutex::new(Admission {
+                accepting: true,
+                active: 0,
+            }),
+            admission_cv: Condvar::new(),
+            #[cfg(test)]
+            record_hook: Mutex::new(None),
         });
         let worker_inner = Arc::clone(&inner);
         let join = std::thread::Builder::new()
@@ -420,19 +463,10 @@ impl JournalHandle {
         frame: RawFrame,
         outcome: DecodeOutcome,
     ) -> anyhow::Result<()> {
-        {
-            let status = self
-                .inner
-                .status
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            anyhow::ensure!(
-                status.state.is_active(),
-                "journal is not accepting records in state {:?}: {}",
-                status.state,
-                status.last_error.as_deref().unwrap_or("no failure detail")
-            );
-        }
+        // The guard spans the entire operation. Shutdown and abort wait for it
+        // to drop, which happens only after a queue failure has been latched
+        // and accepted records have updated their counters.
+        let _admission = self.admit()?;
         let job = RecordJob {
             source,
             connection_epoch,
@@ -443,8 +477,27 @@ impl JournalHandle {
             outcome,
         };
         let timeout = Duration::from_millis(self.inner.durability.enqueue_timeout_ms);
-        match self.inner.queue.send_timeout(Command::Record(job), timeout) {
+        let result = self.inner.queue.send_timeout(Command::Record(job), timeout);
+        #[cfg(test)]
+        {
+            // A deterministic test gate between the queue decision and the
+            // failure latch. It makes the admission-ordering regression
+            // reproducible instead of relying on scheduler timing.
+            let hook = self
+                .inner
+                .record_hook
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            if let Some(hook) = hook {
+                hook();
+            }
+        }
+        match result {
             Ok(()) => {
+                if let Some(reason) = self.failure_reason() {
+                    bail!("journal failed while accepting a record: {reason}");
+                }
                 let mut status = self
                     .inner
                     .status
@@ -470,6 +523,31 @@ impl JournalHandle {
         }
     }
 
+    fn admit(&self) -> anyhow::Result<AdmissionGuard<'_>> {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        anyhow::ensure!(
+            admission.accepting,
+            "journal is not accepting records: {}",
+            self.failure_reason()
+                .unwrap_or_else(|| "shutdown in progress".to_owned())
+        );
+        admission.active = admission.active.saturating_add(1);
+        Ok(AdmissionGuard { inner: &self.inner })
+    }
+
+    #[cfg(test)]
+    fn set_record_hook(&self, hook: Arc<dyn Fn() + Send + Sync>) {
+        *self
+            .inner
+            .record_hook
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(hook);
+    }
+
     #[must_use]
     pub fn status(&self) -> JournalStatus {
         self.inner
@@ -479,12 +557,30 @@ impl JournalHandle {
             .clone()
     }
 
+    fn failure_reason(&self) -> Option<String> {
+        run_failure(&self.inner)
+    }
+
     fn mark_failed(&self, reason: &str) {
-        set_state(&self.inner, RunState::Failed, Some(reason.to_owned()));
+        let mut status = self
+            .inner
+            .status
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if status.state == RunState::Finalized {
+            return;
+        }
+        status.state = RunState::Failed;
+        status.last_error = Some(reason.to_owned());
     }
 
     /// Finalize every segment, write the run manifest, and join the writer.
+    ///
+    /// The timeout bounds producer quiescence, command delivery, response
+    /// waiting, and writer observation. A deadline expiry returns an error and
+    /// leaves the run failed or incomplete; it does not claim finalization.
     pub fn shutdown(&self, timeout: Duration) -> anyhow::Result<JournalSummary> {
+        let deadline = Instant::now() + timeout;
         {
             let mut shutdown = self
                 .inner
@@ -494,36 +590,121 @@ impl JournalHandle {
             anyhow::ensure!(!*shutdown, "journal shutdown was already requested");
             *shutdown = true;
         }
+        if self.status().state == RunState::Incomplete {
+            bail!("journal run is incomplete and cannot be finalized");
+        }
+
+        self.close_admission_and_wait(deadline, timeout, "shutdown")?;
+
+        if let Some(reason) = self.failure_reason() {
+            let _ = self.send_control(Command::Abort, deadline);
+            self.join_writer(deadline);
+            bail!("journal run failed: {reason}");
+        }
+
         let (reply_tx, reply_rx) = channel();
-        self.inner
-            .queue
-            .send(Command::Finalize(reply_tx))
-            .context("journal writer is not running")?;
-        let result = match reply_rx.recv_timeout(timeout) {
-            Ok(Ok(summary)) => Ok(summary),
-            Ok(Err(error)) => Err(anyhow::anyhow!("{error}")),
-            Err(_) => {
-                self.mark_failed("journal finalization timed out");
-                Err(anyhow::anyhow!(
+        if let Err(error) = self.send_control(Command::Finalize(reply_tx), deadline) {
+            self.mark_failed(&format!("journal finalization command failed: {error:#}"));
+            self.join_writer(deadline);
+            return Err(error);
+        }
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let result = if remaining.is_zero() {
+            Err(anyhow::anyhow!("journal finalization timed out"))
+        } else {
+            match reply_rx.recv_timeout(remaining) {
+                Ok(Ok(summary)) => Ok(summary),
+                Ok(Err(error)) => Err(anyhow::anyhow!("{error}")),
+                Err(_) => Err(anyhow::anyhow!(
                     "journal finalization timed out after {timeout:?}"
-                ))
+                )),
             }
         };
-        self.join_writer(timeout);
+        if result.is_err() && self.status().state != RunState::Finalized {
+            self.mark_failed("journal finalization timed out or failed");
+        }
+        self.join_writer(deadline);
         result
     }
 
     /// Stop the writer without finalizing.
     ///
     /// The open segment stays as a `.partial` file and the manifest keeps its
-    /// open state. Verification reports the run as incomplete; no footer or
-    /// manifest entry is fabricated.
+    /// open or failed state. Verification reports the run as incomplete; no
+    /// footer or manifest entry is fabricated. The timeout bounds producer
+    /// quiescence, command delivery, and writer observation; it cannot
+    /// interrupt a write that the operating system is already performing.
     pub fn abort(&self, timeout: Duration) {
-        let _ = self.inner.queue.send(Command::Abort);
-        self.join_writer(timeout);
+        let deadline = Instant::now() + timeout;
+        // Abort shares shutdown's producer-quiescence contract: the writer
+        // must not receive the stop command while a producer is still inside
+        // `record`.
+        if self
+            .close_admission_and_wait(deadline, timeout, "abort")
+            .is_err()
+        {
+            self.join_writer(deadline);
+            return;
+        }
+        if self.send_control(Command::Abort, deadline).is_err() {
+            self.mark_failed("journal abort command could not be delivered");
+        }
+        self.join_writer(deadline);
     }
 
-    fn join_writer(&self, timeout: Duration) {
+    /// Close admission and wait until every admitted producer has completed,
+    /// within the absolute deadline shared with the caller.
+    fn close_admission_and_wait(
+        &self,
+        deadline: Instant,
+        timeout: Duration,
+        operation: &str,
+    ) -> anyhow::Result<()> {
+        let mut admission = self
+            .inner
+            .admission
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        admission.accepting = false;
+        while admission.active > 0 {
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                drop(admission);
+                let reason =
+                    format!("journal {operation} timed out waiting for producers for {timeout:?}");
+                self.mark_failed(&reason);
+                return Err(anyhow::anyhow!("{reason}"));
+            }
+            admission = self
+                .inner
+                .admission_cv
+                .wait_timeout(admission, remaining)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .0;
+        }
+        Ok(())
+    }
+
+    fn send_control(&self, command: Command, deadline: Instant) -> anyhow::Result<()> {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        anyhow::ensure!(
+            !remaining.is_zero(),
+            "journal control deadline expired before delivery"
+        );
+        self.inner
+            .queue
+            .send_timeout(command, remaining)
+            .map_err(|error| match error {
+                crossbeam::channel::SendTimeoutError::Timeout(_) => {
+                    anyhow::anyhow!("journal control command timed out after {remaining:?}")
+                }
+                crossbeam::channel::SendTimeoutError::Disconnected(_) => {
+                    anyhow::anyhow!("journal writer is not running")
+                }
+            })
+    }
+
+    fn join_writer(&self, deadline: Instant) {
         let join = self
             .inner
             .join
@@ -533,7 +714,6 @@ impl JournalHandle {
         let Some(join) = join else {
             return;
         };
-        let deadline = Instant::now() + timeout;
         while !join.is_finished() && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(5));
         }
@@ -562,6 +742,19 @@ fn set_state(inner: &Inner, state: RunState, error: Option<String>) {
     if error.is_some() {
         status.last_error = error;
     }
+}
+
+fn run_failure(inner: &Inner) -> Option<String> {
+    let status = inner
+        .status
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    (status.state == RunState::Failed).then(|| {
+        status
+            .last_error
+            .clone()
+            .unwrap_or_else(|| "failed".to_owned())
+    })
 }
 
 struct RecordJob {
@@ -908,6 +1101,10 @@ fn run_writer(
     let mut last_sync = Instant::now();
 
     loop {
+        if let Some(reason) = run_failure(&inner) {
+            fail_reason(&inner, &mut manifest, &reason);
+            return;
+        }
         select! {
             recv(queue) -> message => match message {
                 Ok(Command::Record(job)) => {
@@ -978,11 +1175,15 @@ fn run_writer(
                     return;
                 }
                 Ok(Command::Abort) => {
-                    set_state(
-                        &inner,
-                        RunState::Incomplete,
-                        Some("journal stopped without finalization".to_owned()),
-                    );
+                    if let Some(reason) = run_failure(&inner) {
+                        fail_reason(&inner, &mut manifest, &reason);
+                    } else {
+                        set_state(
+                            &inner,
+                            RunState::Incomplete,
+                            Some("journal stopped without finalization".to_owned()),
+                        );
+                    }
                     return;
                 }
                 Err(_) => {
@@ -1088,8 +1289,17 @@ fn finalize_run(
     segment: SegmentWriter,
     fault: Option<&FaultHook>,
 ) -> anyhow::Result<JournalSummary> {
+    if let Some(reason) = run_failure(inner) {
+        fail_reason(inner, manifest, &reason);
+        bail!("journal run failed before finalization: {reason}");
+    }
     run_fault(fault, FaultPoint::Finalize)?;
     let entry = segment.finalize()?;
+    if let Some(reason) = run_failure(inner) {
+        manifest.segments.push(entry);
+        fail_reason(inner, manifest, &reason);
+        bail!("journal run failed during finalization: {reason}");
+    }
     manifest.segments.push(entry);
     manifest.state = RunState::Finalized;
     manifest.finalized_at_us = Some(now_us().unwrap_or(0));
@@ -1111,8 +1321,13 @@ fn finalize_run(
         .unwrap_or_else(|poisoned| poisoned.into_inner());
     status.state = RunState::Finalized;
     status.counters.finalized = status.counters.written;
+    // Segment finalization flushed and synced every written record before the
+    // rename, so the durability counters must not lag the footer.
+    status.counters.flushed = status.counters.written;
+    status.counters.synced = status.counters.written;
     status.counters.segments = segment_count;
     status.counters.bytes = bytes;
+    status.counters.queue_depth = 0;
     Ok(JournalSummary {
         run_id: inner.run_id.clone(),
         run_directory: inner.run_directory.display().to_string(),
@@ -1125,10 +1340,14 @@ fn finalize_run(
 
 fn fail(inner: &Inner, manifest: &mut Manifest, error: &anyhow::Error) {
     let message = format!("{error:#}");
+    fail_reason(inner, manifest, &message);
+}
+
+fn fail_reason(inner: &Inner, manifest: &mut Manifest, message: &str) {
     manifest.state = RunState::Failed;
-    manifest.failure = Some(message.clone());
+    manifest.failure = Some(message.to_owned());
     let _ = write_manifest(&inner.run_directory, manifest);
-    set_state(inner, RunState::Failed, Some(message));
+    set_state(inner, RunState::Failed, Some(message.to_owned()));
 }
 
 fn write_manifest(directory: &Path, manifest: &Manifest) -> anyhow::Result<()> {
@@ -1659,6 +1878,21 @@ mod tests {
         panic!("journal did not report a failure");
     }
 
+    fn wait_for_verification_state(directory: &Path, state: RunState) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Ok(verification) = verify_run(directory)
+                && verification.state == state
+            {
+                return;
+            }
+            if Instant::now() >= deadline {
+                panic!("run directory never reached {state:?}");
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     #[test]
     fn payload_bytes_survive_write_and_read() {
         let temp = TempDir::new().expect("tempdir");
@@ -2018,7 +2252,7 @@ mod tests {
     }
 
     #[test]
-    fn queue_saturation_fails_instead_of_dropping() {
+    fn queue_saturation_then_shutdown_stays_failed() {
         let temp = TempDir::new().expect("tempdir");
         let (release_tx, release_rx) = mpsc::channel();
         let release_rx = Arc::new(std::sync::Mutex::new(release_rx));
@@ -2030,7 +2264,7 @@ mod tests {
             {
                 let _ = entered_tx.send(());
                 if let Ok(receiver) = release_rx.lock() {
-                    let _ = receiver.recv_timeout(Duration::from_secs(5));
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
                 }
             }
             Ok(())
@@ -2070,10 +2304,586 @@ mod tests {
             .expect_err("third record must fail");
         assert!(format!("{error:#}").contains("queue stayed full"));
         assert_eq!(handle.status().state, RunState::Failed);
+
+        // The production coordinator finalizes through `shutdown`, not
+        // `abort`. The latched failure must survive that path: the run may
+        // never report a complete journal after a rejected frame.
         let _ = release_tx.send(());
-        handle.abort(Duration::from_secs(1));
+        let shutdown = handle.shutdown(Duration::from_secs(2));
+        assert!(shutdown.is_err(), "shutdown must fail after saturation");
+        assert_eq!(handle.status().state, RunState::Failed);
+        assert!(handle.status().last_error.is_some());
+        let directory = run_directory(temp.path(), "run");
+        let verification = verify_run(&directory).expect("verify");
+        assert!(!verification.complete, "{:?}", verification.errors);
+        assert_eq!(verification.state, RunState::Failed);
+        assert!(
+            verification
+                .errors
+                .iter()
+                .any(|error| error.contains("Failed")),
+            "verifier must surface the failed run state: {:?}",
+            verification.errors
+        );
+        // The third payload was never accepted, so it must not appear anywhere.
+        let records = read_records(&directory).unwrap_or_default();
+        assert!(
+            records.iter().all(|record| record.payload != b"third"),
+            "a rejected payload must not be written"
+        );
+    }
+
+    #[test]
+    fn shutdown_waits_for_a_producer_failure_latch() {
+        let temp = TempDir::new().expect("tempdir");
+        let (release_writer_tx, release_writer_rx) = mpsc::channel();
+        let release_writer_rx = Arc::new(std::sync::Mutex::new(release_writer_rx));
+        let (writer_entered_tx, writer_entered_rx) = mpsc::channel();
+        let writer_blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::Write
+                && !writer_blocked.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = writer_entered_tx.send(());
+                if let Ok(receiver) = release_writer_rx.lock() {
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
+                }
+            }
+            Ok(())
+        });
+        let mut config = test_config(temp.path());
+        config.queue_capacity = 1;
+        config.enqueue_timeout = Duration::from_millis(150);
+        let handle =
+            Arc::new(JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start"));
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"first",
+            DecodeOutcome::decoded(1),
+        );
+        writer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer entered hook");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            2,
+            b"second",
+            DecodeOutcome::decoded(1),
+        );
+
+        // Hold the producer after the queue decision but before the failure
+        // latch. Its admission guard must keep shutdown from observing an
+        // idle producer set.
+        let (producer_entered_tx, producer_entered_rx) = mpsc::channel();
+        let (release_producer_tx, release_producer_rx) = mpsc::channel();
+        let release_producer_rx = Arc::new(std::sync::Mutex::new(release_producer_rx));
+        let producer_gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        handle.set_record_hook(Arc::new(move || {
+            if producer_gate.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let _ = producer_entered_tx.send(());
+            if let Ok(receiver) = release_producer_rx.lock() {
+                let _ = receiver.recv_timeout(Duration::from_secs(10));
+            }
+        }));
+
+        let producer = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || {
+                handle.record(
+                    SourceId::new(0, 0),
+                    1,
+                    3,
+                    now_us().unwrap_or(0),
+                    RawFrame::binary(b"third".to_vec()),
+                    DecodeOutcome::decoded(1),
+                )
+            })
+        };
+        producer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("producer reached the post-enqueue gate");
+
+        let shutdown = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || handle.shutdown(Duration::from_secs(2)))
+        };
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must wait for the active producer"
+        );
+
+        // Give shutdown queue space while the producer is still gated. If it
+        // were allowed to proceed, it would submit Finalize before the queue
+        // failure is latched.
+        let _ = release_writer_tx.send(());
+        thread::sleep(Duration::from_millis(150));
+        assert!(
+            !shutdown.is_finished(),
+            "shutdown must not finalize before the producer latches its queue failure"
+        );
+
+        let _ = release_producer_tx.send(());
+        assert!(
+            producer.join().expect("producer joined").is_err(),
+            "the timed-out enqueue must be reported"
+        );
+        assert!(
+            shutdown.join().expect("shutdown joined").is_err(),
+            "a latched queue failure must fail shutdown"
+        );
+        assert_eq!(handle.status().state, RunState::Failed);
+        let directory = run_directory(temp.path(), "run");
+        wait_for_verification_state(&directory, RunState::Failed);
+        let verification = verify_run(&directory).expect("verify");
+        assert!(!verification.complete, "{:?}", verification.errors);
+        assert!(
+            read_records(&directory)
+                .unwrap_or_default()
+                .iter()
+                .all(|record| record.payload != b"third"),
+            "the rejected payload must not be written"
+        );
+    }
+
+    #[test]
+    fn abort_waits_for_an_active_producer_before_stopping_the_writer() {
+        let temp = TempDir::new().expect("tempdir");
+        let (release_writer_tx, release_writer_rx) = mpsc::channel();
+        let release_writer_rx = Arc::new(std::sync::Mutex::new(release_writer_rx));
+        let (writer_entered_tx, writer_entered_rx) = mpsc::channel();
+        let writer_blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::Write
+                && !writer_blocked.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = writer_entered_tx.send(());
+                if let Ok(receiver) = release_writer_rx.lock() {
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
+                }
+            }
+            Ok(())
+        });
+        let mut config = test_config(temp.path());
+        config.queue_capacity = 2;
+        let handle =
+            Arc::new(JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start"));
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"first",
+            DecodeOutcome::decoded(1),
+        );
+        writer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer entered hook");
+
+        // This producer has already been admitted and enqueued successfully,
+        // but is held inside `record` before the admission guard is released.
+        let (producer_entered_tx, producer_entered_rx) = mpsc::channel();
+        let (release_producer_tx, release_producer_rx) = mpsc::channel();
+        let release_producer_rx = Arc::new(std::sync::Mutex::new(release_producer_rx));
+        let producer_gate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        handle.set_record_hook(Arc::new(move || {
+            if producer_gate.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                return;
+            }
+            let _ = producer_entered_tx.send(());
+            if let Ok(receiver) = release_producer_rx.lock() {
+                let _ = receiver.recv_timeout(Duration::from_secs(10));
+            }
+        }));
+        let producer = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || {
+                handle.record(
+                    SourceId::new(0, 0),
+                    1,
+                    2,
+                    now_us().unwrap_or(0),
+                    RawFrame::binary(b"second".to_vec()),
+                    DecodeOutcome::decoded(1),
+                )
+            })
+        };
+        producer_entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("producer reached the post-enqueue gate");
+
+        let abort = {
+            let handle = Arc::clone(&handle);
+            thread::spawn(move || handle.abort(Duration::from_secs(2)))
+        };
+        thread::sleep(Duration::from_millis(100));
+        assert!(
+            !abort.is_finished(),
+            "abort must wait for the active producer"
+        );
+
+        // Free the writer. An abort that only stopped the writer would now
+        // complete while the producer is still inside `record`.
+        let _ = release_writer_tx.send(());
+        thread::sleep(Duration::from_millis(200));
+        assert!(
+            !abort.is_finished(),
+            "abort must not stop the writer while a producer is still active"
+        );
+
+        let _ = release_producer_tx.send(());
+        producer
+            .join()
+            .expect("producer joined")
+            .expect("the record was accepted before abort closed admission");
+        abort.join().expect("abort joined");
+        assert_eq!(handle.status().state, RunState::Incomplete);
+        let directory = run_directory(temp.path(), "run");
+        wait_for_verification_state(&directory, RunState::Open);
+        assert!(!verify_run(&directory).expect("verify").complete);
+    }
+
+    #[test]
+    fn concurrent_producers_stop_after_failure() {
+        let temp = TempDir::new().expect("tempdir");
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::Write {
+                bail!("simulated write failure");
+            }
+            Ok(())
+        });
+        let handle = JournalHandle::start_inner(test_config(temp.path()), meta("run"), Some(hook))
+            .expect("start");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"trigger",
+            DecodeOutcome::decoded(1),
+        );
+        wait_failed(&handle);
+
+        let handle = Arc::new(handle);
+        let workers: Vec<_> = (0..4)
+            .map(|replica| {
+                let handle = Arc::clone(&handle);
+                thread::spawn(move || {
+                    let source = SourceId::new(0, replica);
+                    for seq in 1..=25u64 {
+                        match handle.record(
+                            source,
+                            1,
+                            seq,
+                            now_us().unwrap_or(0),
+                            RawFrame::binary(b"late".to_vec()),
+                            DecodeOutcome::decoded(1),
+                        ) {
+                            Ok(()) => {}
+                            Err(error) => return Err(format!("{error:#}")),
+                        }
+                    }
+                    Ok(())
+                })
+            })
+            .collect();
+        for worker in workers {
+            let outcome = worker.join().expect("worker joined");
+            assert!(outcome.is_err(), "a latched journal must reject records");
+        }
+        assert_eq!(handle.status().state, RunState::Failed);
         let verification = verify_run(&run_directory(temp.path(), "run")).expect("verify");
         assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+    }
+
+    #[test]
+    fn blocked_writer_bounds_shutdown() {
+        let temp = TempDir::new().expect("tempdir");
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(std::sync::Mutex::new(release_rx));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::Write
+                && !blocked.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = entered_tx.send(());
+                if let Ok(receiver) = release_rx.lock() {
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
+                }
+            }
+            Ok(())
+        });
+        let mut config = test_config(temp.path());
+        // One slot is held by the queued record, so the Finalize command can
+        // only be delivered if the writer drains — which it cannot.
+        config.queue_capacity = 1;
+        let handle = JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"first",
+            DecodeOutcome::decoded(1),
+        );
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer entered hook");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            2,
+            b"second",
+            DecodeOutcome::decoded(1),
+        );
+
+        // The writer is stuck in a write and the queue is full: shutdown must
+        // still return close to its deadline instead of blocking on the
+        // bounded channel forever.
+        let started = Instant::now();
+        let shutdown = handle.shutdown(Duration::from_millis(300));
+        let elapsed = started.elapsed();
+        assert!(shutdown.is_err(), "a blocked writer cannot be finalized");
+        assert!(
+            elapsed >= Duration::from_millis(250) && elapsed <= Duration::from_secs(2),
+            "shutdown elapsed {elapsed:?}, expected ~300ms"
+        );
+        assert_eq!(handle.status().state, RunState::Failed);
+
+        let _ = release_tx.send(());
+        let directory = run_directory(temp.path(), "run");
+        wait_for_verification_state(&directory, RunState::Failed);
+        assert!(!verify_run(&directory).expect("verify").complete);
+    }
+
+    #[test]
+    fn blocked_writer_bounds_abort() {
+        let temp = TempDir::new().expect("tempdir");
+        let (release_tx, release_rx) = mpsc::channel();
+        let release_rx = Arc::new(std::sync::Mutex::new(release_rx));
+        let (entered_tx, entered_rx) = mpsc::channel();
+        let blocked = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::Write
+                && !blocked.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                let _ = entered_tx.send(());
+                if let Ok(receiver) = release_rx.lock() {
+                    let _ = receiver.recv_timeout(Duration::from_secs(10));
+                }
+            }
+            Ok(())
+        });
+        let mut config = test_config(temp.path());
+        // One slot is held by the queued record, so the Abort command can only
+        // be delivered if the writer drains — which it cannot.
+        config.queue_capacity = 1;
+        let handle = JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"first",
+            DecodeOutcome::decoded(1),
+        );
+        entered_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("writer entered hook");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            2,
+            b"second",
+            DecodeOutcome::decoded(1),
+        );
+
+        // `abort` must not delay shutdown either: the undeliverable command
+        // marks the run failed and the call returns within the deadline.
+        let started = Instant::now();
+        handle.abort(Duration::from_millis(300));
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(250) && elapsed <= Duration::from_secs(2),
+            "abort elapsed {elapsed:?}, expected ~300ms"
+        );
+        assert_eq!(handle.status().state, RunState::Failed);
+        assert!(
+            handle
+                .status()
+                .last_error
+                .is_some_and(|error| error.contains("abort")),
+            "abort must record why the command was not delivered"
+        );
+
+        let _ = release_tx.send(());
+        let directory = run_directory(temp.path(), "run");
+        wait_for_verification_state(&directory, RunState::Failed);
+        assert!(!verify_run(&directory).expect("verify").complete);
+    }
+
+    #[test]
+    fn finalize_reply_timeout_stays_incomplete() {
+        let temp = TempDir::new().expect("tempdir");
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let release_rx = Arc::new(std::sync::Mutex::new(release_rx));
+        let (entered_tx, _entered_rx) = mpsc::channel();
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::Finalize {
+                let _ = entered_tx.send(());
+                if let Ok(receiver) = release_rx.lock() {
+                    // A dropped release channel means the stall never ends and
+                    // finalization must not complete.
+                    if receiver.recv_timeout(Duration::from_secs(10)).is_err() {
+                        bail!("simulated finalize stall aborted");
+                    }
+                }
+            }
+            Ok(())
+        });
+        let handle = JournalHandle::start_inner(test_config(temp.path()), meta("run"), Some(hook))
+            .expect("start");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"record",
+            DecodeOutcome::decoded(1),
+        );
+
+        // The Finalize command was accepted but the writer never replies
+        // within the deadline: shutdown returns an error and the run is not
+        // reported complete.
+        let started = Instant::now();
+        let shutdown = handle.shutdown(Duration::from_millis(300));
+        let elapsed = started.elapsed();
+        assert!(shutdown.is_err(), "a stalled finalization cannot complete");
+        assert!(
+            elapsed >= Duration::from_millis(250) && elapsed <= Duration::from_secs(2),
+            "shutdown elapsed {elapsed:?}, expected ~300ms"
+        );
+        let directory = run_directory(temp.path(), "run");
+        assert!(!verify_run(&directory).expect("verify").complete);
+
+        // Ending the stall lets the writer resolve the run to a terminal
+        // failed state instead of leaving a finalization claim behind.
+        drop(release_tx);
+        wait_for_verification_state(&directory, RunState::Failed);
+    }
+
+    #[test]
+    fn repeated_concurrent_and_dead_writer_shutdowns_are_bounded() {
+        let temp = TempDir::new().expect("tempdir");
+        let handle = start(temp.path(), "run");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"record",
+            DecodeOutcome::decoded(1),
+        );
+        let first = handle.shutdown(Duration::from_secs(2)).expect("shutdown");
+        assert_eq!(first.record_count, 1);
+
+        // A second shutdown is refused immediately instead of re-entering the
+        // writer lifecycle.
+        let started = Instant::now();
+        let repeated = handle.shutdown(Duration::from_secs(2));
+        assert!(repeated.is_err());
+        assert!(started.elapsed() <= Duration::from_secs(1));
+
+        // Concurrent shutdowns: exactly one proceeds, the rest are refused
+        // without blocking.
+        let handle = Arc::new(handle);
+        let racers: Vec<_> = (0..2)
+            .map(|_| {
+                let handle = Arc::clone(&handle);
+                thread::spawn(move || handle.shutdown(Duration::from_secs(2)))
+            })
+            .collect();
+        let mut accepted = 0;
+        for racer in racers {
+            match racer.join().expect("racer joined") {
+                Ok(_) => accepted += 1,
+                Err(error) => assert!(format!("{error:#}").contains("already requested")),
+            }
+        }
+        assert_eq!(accepted, 0, "a joined writer cannot finalize again");
+
+        // A writer that died in a storage failure fails shutdown promptly.
+        let failed = TempDir::new().expect("tempdir");
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::Write {
+                bail!("simulated write failure");
+            }
+            Ok(())
+        });
+        let handle =
+            JournalHandle::start_inner(test_config(failed.path()), meta("run"), Some(hook))
+                .expect("start");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"record",
+            DecodeOutcome::decoded(1),
+        );
+        wait_failed(&handle);
+        let started = Instant::now();
+        assert!(handle.shutdown(Duration::from_secs(2)).is_err());
+        assert!(
+            started.elapsed() <= Duration::from_secs(1),
+            "shutdown against a dead writer must not wait for the full timeout"
+        );
+    }
+
+    #[test]
+    fn successful_shutdown_reconciles_counters() {
+        let temp = TempDir::new().expect("tempdir");
+        let handle = start(temp.path(), "run");
+        for seq in 1..=5 {
+            append(
+                &handle,
+                SourceId::new(0, 0),
+                1,
+                seq,
+                &[b'r'; 64],
+                DecodeOutcome::decoded(1),
+            );
+        }
+        let summary = handle
+            .shutdown(Duration::from_secs(2))
+            .expect("journal shutdown");
+        let status = handle.status();
+        assert_eq!(status.state, RunState::Finalized);
+        assert!(status.last_error.is_none());
+        assert_eq!(status.counters.queued, 5);
+        assert_eq!(status.counters.written, 5);
+        assert_eq!(status.counters.flushed, 5);
+        assert_eq!(status.counters.synced, 5);
+        assert_eq!(status.counters.finalized, 5);
+        assert_eq!(status.counters.queue_depth, 0);
+        assert_eq!(summary.record_count, 5);
+        assert_eq!(summary.record_count, status.counters.finalized);
+        let directory = run_directory(temp.path(), "run");
+        let verification = verify_run(&directory).expect("verify");
+        assert!(verification.complete, "{:?}", verification.errors);
+        assert_eq!(verification.record_count, status.counters.finalized);
+        assert_eq!(verification.segments.len() as u64, status.counters.segments);
     }
 
     #[test]

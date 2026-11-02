@@ -79,8 +79,14 @@ REQUIRED_TESTS = {
     "negative_control_missing_update_is_detected_by_verify",
     "payload_bytes_survive_write_and_read",
     "checksum_mismatch_and_corrupt_manifest_fail_verification",
-    "queue_saturation_fails_instead_of_dropping",
+    "queue_saturation_then_shutdown_stays_failed",
+    "concurrent_producers_stop_after_failure",
+    "successful_shutdown_reconciles_counters",
+    "blocked_writer_bounds_shutdown",
+    "blocked_writer_bounds_abort",
     "graceful_shutdown_finalizes_rotated_segments",
+    "journal_accounts_for_every_delivered_payload",
+    "rejected_payloads_are_journaled_across_reconnects",
     "journal_finalizes_and_verifies_on_graceful_shutdown",
 }
 
