@@ -1,0 +1,10 @@
+[package]
+name = "criterion"
+version = "0.5.1"
+edition = "2024"
+description = "Statistics-driven micro-benchmarking harness"
+
+[features]
+default = []
+html_reports = []
+async_tokio = []
