@@ -77,7 +77,7 @@ impl<T: AlignedSbeSchema> AlignedSbeReader<T> {
 
     /// Create a new [`AlignedSbeReader`] from the file at `path`, with
     /// `chunk_size` for chunk size.
-    fn open_with_chunk_size(path: impl AsRef<Path>, chunk_size: usize) -> anyhow::Result<Self> {
+    pub fn open_with_chunk_size(path: impl AsRef<Path>, chunk_size: usize) -> anyhow::Result<Self> {
         let file = File::open(path)?;
         let file_len = file.metadata()?.len();
 

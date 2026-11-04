@@ -45,31 +45,35 @@ impl AlignedSbeWriter {
         let len = message.encoded_length_with_header()?;
         let payload_limit = self.chunk - HEADER_LENGTH;
         anyhow::ensure!(len <= payload_limit, "SBE message does not fit in a chunk");
-        if len > payload_limit - self.buf.len() {
+        if self.buf.len() + len > payload_limit {
             self.flush()?;
         }
 
+        self.buf.reserve(len);
         let start = self.buf.len();
-        self.buf.resize(start + len, 0);
-        let result = message.encode(&mut self.buf[start..]).and_then(|written| {
-            anyhow::ensure!(
-                written == len,
-                "SBE encoded length mismatch: expected {len} bytes, wrote {written}"
-            );
-            Ok(())
-        });
-        if result.is_err() {
-            self.buf.truncate(start);
+        // SAFETY: We reserved at least `len` bytes in `self.buf`. We encode directly into
+        // the uninitialized tail slice to eliminate redundant zero-initialization (memset).
+        // `self.buf.set_len` is only updated after `encode` succeeds and verifies `written == len`.
+        unsafe {
+            let slice = std::slice::from_raw_parts_mut(self.buf.as_mut_ptr().add(start), len);
+            message.encode(slice).and_then(|written| {
+                anyhow::ensure!(
+                    written == len,
+                    "SBE encoded length mismatch: expected {len} bytes, wrote {written}"
+                );
+                self.buf.set_len(start + written);
+                Ok(())
+            })
         }
-        result
     }
 
     /// Flush the current buffer to disk, and clear it.
     pub fn flush(&mut self) -> anyhow::Result<()> {
         if !self.buf.is_empty() {
             self.buf.resize(self.chunk, 0);
-            self.file.write_all(&self.buf)?;
+            let write_res = self.file.write_all(&self.buf);
             self.buf.clear();
+            write_res?;
         }
         Ok(())
     }
