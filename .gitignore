@@ -2,3 +2,6 @@ target/
 **/target/
 *.log
 *.sbe
+kalshi.*
+.env
+!.env.example

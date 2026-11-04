@@ -21,8 +21,32 @@ use engineering_challenge::mock::MockAdapter;
 use tokio::signal;
 use tracing::{info, warn};
 
+/// Simple .env loader populating missing environment variables before thread spawning.
+fn load_dotenv() {
+    if let Ok(content) = std::fs::read_to_string(".env") {
+        for line in content.lines() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            if let Some((k, v)) = line.split_once('=') {
+                let k = k.trim();
+                let v = v.trim().trim_matches('"').trim_matches('\'');
+                if std::env::var(k).is_err() {
+                    // Safety: single-threaded startup before async runtime or background workers
+                    unsafe {
+                        std::env::set_var(k, v);
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
+    load_dotenv();
+
     // Structured logging: write to stderr so stdout is reserved for SBE binary data
     tracing_subscriber::fmt()
         .with_env_filter(
