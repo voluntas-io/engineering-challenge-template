@@ -226,7 +226,11 @@ fn test_orderbook_burst_negative_deltas_invariants() {
     let mut lcg: u64 = 42;
     for _ in 0..2000 {
         lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let side = if lcg % 2 == 0 { Side::Buy } else { Side::Sell };
+        let side = if lcg.is_multiple_of(2) {
+            Side::Buy
+        } else {
+            Side::Sell
+        };
         lcg = lcg.wrapping_mul(6364136223846793005).wrapping_add(1);
         let price_offset = (lcg % 40) as i64; // spans both existing and unquoted price range
         let price = 400_000 + price_offset * 5_000;
@@ -417,13 +421,13 @@ fn test_orderbook_oracle_differential_fuzzing() {
 
         if op_type == 0 {
             // Snapshot operation
-            let is_stale = (lcg % 4) == 0 && current_clock > 10;
+            let is_stale = lcg.is_multiple_of(4) && current_clock > 10;
             let snap_clock = if is_stale {
                 current_clock - 5
             } else {
                 current_clock + 1
             };
-            let side = if (lcg % 2) == 0 {
+            let side = if lcg.is_multiple_of(2) {
                 Side::Buy
             } else {
                 Side::Sell
@@ -456,20 +460,20 @@ fn test_orderbook_oracle_differential_fuzzing() {
             }
         } else {
             // Delta operation
-            let is_stale = (lcg % 5) == 0 && current_clock > 10;
+            let is_stale = lcg.is_multiple_of(5) && current_clock > 10;
             let delta_clock = if is_stale {
                 current_clock - (lcg % 5 + 1)
             } else {
                 current_clock + (lcg % 3) // 0 (same clock) or 1..2 (advance)
             };
 
-            let side = if (lcg % 2) == 0 {
+            let side = if lcg.is_multiple_of(2) {
                 Side::Buy
             } else {
                 Side::Sell
             };
             let price = 300_000 + ((lcg % 25) as i64 * 10_000);
-            let is_negative = (lcg % 3) == 0;
+            let is_negative = lcg.is_multiple_of(3);
             let delta_qty = if is_negative {
                 -((lcg % 5 + 1) as i64 * 100_000)
             } else {

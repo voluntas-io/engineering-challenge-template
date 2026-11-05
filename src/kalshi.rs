@@ -265,10 +265,10 @@ pub async fn fetch_open_markets(client: &reqwest::Client) -> Result<Vec<String>>
         for m in resp.markets {
             if m.status == "open" || m.status == "active" {
                 tickers.push(m.ticker);
-                if let Some(max) = max_markets {
-                    if tickers.len() >= max {
-                        return Ok(tickers);
-                    }
+                if let Some(max) = max_markets
+                    && tickers.len() >= max
+                {
+                    return Ok(tickers);
                 }
             }
         }

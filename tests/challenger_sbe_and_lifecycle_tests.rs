@@ -194,7 +194,7 @@ fn test_aligned_sbe_writer_multi_chunk_rotation_stress() {
     while offset < file_bytes.len() {
         let chunk_end = ((offset / chunk_size) + 1) * chunk_size;
         // Check if next 8 bytes are zeroes (sentinel)
-        if offset + 8 <= chunk_end && &file_bytes[offset..offset + 8] == &[0u8; 8] {
+        if offset + 8 <= chunk_end && file_bytes[offset..offset + 8] == [0u8; 8] {
             // Jump to next chunk
             offset = chunk_end;
             continue;

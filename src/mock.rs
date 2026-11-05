@@ -226,12 +226,11 @@ fn parse_levels(val: Option<&serde_json::Value>) -> Option<Vec<(i64, i64)>> {
     let arr = val?.as_array()?;
     let mut levels = Vec::with_capacity(arr.len());
     for item in arr {
-        if let serde_json::Value::Array(pair) = item {
-            if pair.len() == 2 {
-                if let (Some(p), Some(q)) = (pair[0].as_i64(), pair[1].as_i64()) {
-                    levels.push((p, q));
-                }
-            }
+        if let serde_json::Value::Array(pair) = item
+            && pair.len() == 2
+            && let (Some(p), Some(q)) = (pair[0].as_i64(), pair[1].as_i64())
+        {
+            levels.push((p, q));
         }
     }
     Some(levels)

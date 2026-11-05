@@ -368,7 +368,7 @@ impl Collector {
     async fn handle_event(
         &self,
         event: WsEvent,
-        buckets: &mut Vec<BucketState>,
+        buckets: &mut [BucketState],
         event_tx: &mpsc::UnboundedSender<WsEvent>,
         last_update: &mut HashMap<String, Instant>,
     ) -> Result<()> {
@@ -637,7 +637,7 @@ impl Collector {
         Ok(())
     }
 
-    fn remove_markets_from_buckets(&self, tickers: Vec<String>, buckets: &mut Vec<BucketState>) {
+    fn remove_markets_from_buckets(&self, tickers: Vec<String>, buckets: &mut [BucketState]) {
         for ticker in &tickers {
             for bucket in buckets.iter_mut() {
                 if bucket.markets.remove(ticker) {
@@ -690,7 +690,7 @@ impl Collector {
 
     async fn monitor_subscriptions(
         &self,
-        buckets: &mut Vec<BucketState>,
+        buckets: &mut [BucketState],
         last_update: &HashMap<String, Instant>,
     ) -> Result<()> {
         let now = Instant::now();
@@ -735,7 +735,7 @@ impl Collector {
 
     async fn maybe_reconnect_sockets(
         &self,
-        buckets: &mut Vec<BucketState>,
+        buckets: &mut [BucketState],
         event_tx: &mpsc::UnboundedSender<WsEvent>,
     ) -> Result<()> {
         let now = Instant::now();
@@ -784,19 +784,6 @@ impl Collector {
 }
 
 // ── Helper: bucket/socket lookup ──────────────────────────────────────────────
-
-#[allow(dead_code)]
-fn find_socket_mut<'a>(
-    buckets: &'a mut Vec<BucketState>,
-    socket_id: usize,
-) -> Option<&'a mut SocketHandle> {
-    for bucket in buckets {
-        if let Some(h) = bucket.sockets.iter_mut().find(|s| s.socket_id == socket_id) {
-            return Some(h);
-        }
-    }
-    None
-}
 
 fn find_bucket_for_socket(buckets: &[BucketState], socket_id: usize) -> Option<usize> {
     buckets
@@ -876,6 +863,12 @@ struct SocketHandle {
     _spawned_at: Instant,
 }
 
+type WsError = tokio_tungstenite::tungstenite::Error;
+type WsSink = std::pin::Pin<Box<dyn futures_util::Sink<Message, Error = WsError> + Send>>;
+type WsStream = std::pin::Pin<
+    Box<dyn futures_util::Stream<Item = std::result::Result<Message, WsError>> + Send>,
+>;
+
 // ── WebSocket task ─────────────────────────────────────────────────────────────
 
 async fn ws_task(
@@ -940,33 +933,20 @@ async fn ws_task_inner(
         );
     }
 
-    let (mut write, mut read): (
-        std::pin::Pin<
-            Box<
-                dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
-                    + Send,
-            >,
-        >,
-        std::pin::Pin<
-            Box<
-                dyn futures_util::Stream<
-                        Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>,
-                    > + Send,
-            >,
-        >,
-    ) = if let Some(stream) = crate::mock::take_mock_stream(ws_url, socket_id) {
-        let (ws, _) = tokio_tungstenite::client_async(request, stream)
-            .await
-            .context("WebSocket mock connect")?;
-        let (w, r) = ws.split();
-        (Box::pin(w), Box::pin(r))
-    } else {
-        let (ws, _) = tokio_tungstenite::connect_async(request)
-            .await
-            .context("WebSocket connect")?;
-        let (w, r) = ws.split();
-        (Box::pin(w), Box::pin(r))
-    };
+    let (mut write, mut read): (WsSink, WsStream) =
+        if let Some(stream) = crate::mock::take_mock_stream(ws_url, socket_id) {
+            let (ws, _) = tokio_tungstenite::client_async(request, stream)
+                .await
+                .context("WebSocket mock connect")?;
+            let (w, r) = ws.split();
+            (Box::pin(w), Box::pin(r))
+        } else {
+            let (ws, _) = tokio_tungstenite::connect_async(request)
+                .await
+                .context("WebSocket connect")?;
+            let (w, r) = ws.split();
+            (Box::pin(w), Box::pin(r))
+        };
 
     info!("Socket {socket_id}: connected");
 
@@ -1205,9 +1185,13 @@ async fn mock_task(
                 ticker_idx += 1;
                 clock += 1;
 
-                let is_buy = clock % 2 == 0;
+                let is_buy = clock.is_multiple_of(2);
                 let price = if is_buy { 450_000 } else { 550_000 };
-                let qty_delta = if clock % 5 == 0 { -500_000 } else { 500_000 };
+                let qty_delta = if clock.is_multiple_of(5) {
+                    -500_000
+                } else {
+                    500_000
+                };
 
                 let _ = event_tx.send(WsEvent::Delta {
                     socket_id,
@@ -1296,7 +1280,7 @@ mod tests {
 
     async fn feed(
         collector: &Collector,
-        buckets: &mut Vec<BucketState>,
+        buckets: &mut [BucketState],
         last_update: &mut HashMap<String, Instant>,
         events: Vec<WsEvent>,
     ) -> Result<()> {
