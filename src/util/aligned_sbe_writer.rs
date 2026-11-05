@@ -202,14 +202,32 @@ impl<W: Write + Send> AlignedSbeWriter<W> {
     }
 
     fn write_uncommitted(&mut self) -> anyhow::Result<()> {
-        if self.committed < self.buf.len() {
-            let bytes = &self.buf[self.committed..];
-            self.writer.write_all(bytes)?;
-            if let Some(checksum) = &mut self.checksum {
-                checksum.update(bytes);
+        // Retry short writes explicitly so `committed` and `bytes_written`
+        // describe the bytes the sink accepted, including a prefix accepted
+        // before an error. A later flush resumes at that boundary instead of
+        // repeating the prefix.
+        while self.committed < self.buf.len() {
+            let start = self.committed;
+            let end = self.buf.len();
+            match self.writer.write(&self.buf[start..end]) {
+                Ok(0) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::WriteZero,
+                        "failed to write whole buffer",
+                    )
+                    .into());
+                }
+                Ok(written) => {
+                    let written_end = start + written;
+                    self.committed = written_end;
+                    self.bytes_written += written as u64;
+                    if let Some(checksum) = &mut self.checksum {
+                        checksum.update(&self.buf[start..written_end]);
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => return Err(error.into()),
             }
-            self.bytes_written += bytes.len() as u64;
-            self.committed = self.buf.len();
         }
         Ok(())
     }
@@ -249,7 +267,8 @@ fn validate_chunk(chunk: usize) -> anyhow::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Cursor;
+    use std::io::{self, Cursor, Write};
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -264,6 +283,133 @@ mod tests {
             buf[..16].fill(1);
             Ok(16)
         }
+    }
+
+    /// Deterministic byte sink: at most `max_per_write` bytes per call, with an
+    /// optional absolute byte limit that fails the next write.
+    #[derive(Clone)]
+    struct ShortSink {
+        written: Arc<Mutex<Vec<u8>>>,
+        write_calls: Arc<Mutex<usize>>,
+        max_per_write: usize,
+        fail_at: Arc<Mutex<Option<usize>>>,
+    }
+
+    impl ShortSink {
+        fn new(max_per_write: usize, fail_at: Option<usize>) -> Self {
+            Self {
+                written: Arc::new(Mutex::new(Vec::new())),
+                write_calls: Arc::new(Mutex::new(0)),
+                max_per_write,
+                fail_at: Arc::new(Mutex::new(fail_at)),
+            }
+        }
+
+        fn bytes(&self) -> Vec<u8> {
+            self.written.lock().unwrap().clone()
+        }
+
+        fn write_calls(&self) -> usize {
+            *self.write_calls.lock().unwrap()
+        }
+
+        fn allow_writes(&self) {
+            *self.fail_at.lock().unwrap() = None;
+        }
+    }
+
+    impl Write for ShortSink {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            *self.write_calls.lock().unwrap() += 1;
+            let mut written = self.written.lock().unwrap();
+            let mut take = buf.len().min(self.max_per_write);
+            if let Some(limit) = *self.fail_at.lock().unwrap() {
+                if written.len() >= limit {
+                    return Err(io::Error::other("injected short-write failure"));
+                }
+                take = take.min(limit - written.len());
+            }
+            if take == 0 {
+                return Ok(0);
+            }
+            written.extend_from_slice(&buf[..take]);
+            Ok(take)
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn assert_message_then_padding(bytes: &[u8], chunk: usize) {
+        assert_eq!(bytes.len(), chunk);
+        assert!(bytes[..16].iter().all(|byte| *byte == 1));
+        assert!(bytes[16..].iter().all(|byte| *byte == 0));
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        Sha256::digest(bytes)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect()
+    }
+
+    #[test]
+    fn short_writes_are_completed_without_data_loss() {
+        let sink = ShortSink::new(7, None);
+        let mut writer = AlignedSbeWriter::from_writer(sink.clone(), 1024).unwrap();
+        writer.write_msg(&TestMessage).unwrap();
+        writer.flush().unwrap();
+        assert_eq!(writer.bytes_written(), 16);
+        writer.finish().unwrap();
+        assert_eq!(writer.bytes_written(), 1024);
+        assert!(sink.write_calls() > 1);
+        assert_message_then_padding(&sink.bytes(), 1024);
+    }
+
+    #[test]
+    fn write_error_before_any_byte_is_reported_without_progress() {
+        let sink = ShortSink::new(64, Some(0));
+        let mut writer = AlignedSbeWriter::from_writer(sink.clone(), 1024).unwrap();
+        writer.write_msg(&TestMessage).unwrap();
+        let error = writer.flush().unwrap_err();
+        assert_eq!(sink.bytes().len(), 0);
+        assert_eq!(writer.bytes_written(), 0);
+        assert!(error.to_string().contains("injected short-write failure"));
+    }
+
+    #[test]
+    fn partial_write_error_records_the_prefix_and_resumes_without_duplication() {
+        let sink = ShortSink::new(4, Some(5));
+        let mut writer = AlignedSbeWriter::from_writer(sink.clone(), 1024).unwrap();
+        writer.write_msg(&TestMessage).unwrap();
+        assert!(writer.flush().is_err());
+        assert_eq!(sink.bytes().len(), 5);
+        assert_eq!(writer.bytes_written(), 5);
+
+        sink.allow_writes();
+        writer.flush().unwrap();
+        assert_eq!(sink.bytes().len(), 16);
+        assert_eq!(writer.bytes_written(), 16);
+
+        writer.finish().unwrap();
+        assert_message_then_padding(&sink.bytes(), 1024);
+    }
+
+    #[test]
+    fn partial_write_checksum_covers_the_accepted_prefix_and_resumed_bytes() {
+        let sink = ShortSink::new(4, Some(5));
+        let mut writer = AlignedSbeWriter::from_writer(sink.clone(), 1024).unwrap();
+        writer.enable_checksum().unwrap();
+        writer.write_msg(&TestMessage).unwrap();
+        assert!(writer.flush().is_err());
+        sink.allow_writes();
+        writer.flush().unwrap();
+        writer.finish().unwrap();
+        assert_eq!(
+            writer.checksum_hex().as_deref(),
+            Some(sha256_hex(&sink.bytes()).as_str())
+        );
     }
 
     #[test]
