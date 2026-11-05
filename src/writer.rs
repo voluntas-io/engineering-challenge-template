@@ -1282,7 +1282,13 @@ mod tests {
             format!("{error:#}").contains("injected flush failure"),
             "unexpected error: {error:#}"
         );
-        let _ = writer.shutdown(PATIENT_TIMEOUT).await;
+        // A later successful shutdown must not erase the flush failure or
+        // report the run as complete.
+        let shutdown = writer.shutdown(PATIENT_TIMEOUT).await.unwrap_err();
+        assert!(
+            format!("{shutdown:#}").contains("injected flush failure"),
+            "unexpected shutdown error: {shutdown:#}"
+        );
     }
 
     #[tokio::test]

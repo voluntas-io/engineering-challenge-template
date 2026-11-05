@@ -30,6 +30,8 @@ The framework is additive. Historical verification records, commit messages, fix
 | [`project-language-audit-2026-11-02.md`](project-language-audit-2026-11-02.md) | Historical remote language audit at the baseline commit |
 | [`verification-2026-11-02-pack.md`](verification-2026-11-02-pack.md) | Historical verification of the assurance pack before integration |
 | [`verification-2026-11-05-integration.md`](verification-2026-11-05-integration.md) | Local integration verification and baseline disposition |
+| [`../verification-2026-11-05-jh4-short-writes.md`](../verification-2026-11-05-jh4-short-writes.md) | JH-4 short and partial-write evidence |
+| [`../verification-2026-11-05-jh4-flush-sync.md`](../verification-2026-11-05-jh4-flush-sync.md) | JH-4 flush and sync failure evidence |
 | [`reports/english-audit-2026-11-05-main-3da31e8.json`](reports/english-audit-2026-11-05-main-3da31e8.json) | Machine-readable baseline audit |
 | [`reports/project-language-audit-2026-11-02.json`](reports/project-language-audit-2026-11-02.json) | Historical machine-readable remote audit metadata |
 | [`ci/quality-gate.proposed.yml`](ci/quality-gate.proposed.yml) | Proposed non-blocking CI job; not installed |

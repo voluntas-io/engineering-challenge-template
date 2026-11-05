@@ -341,10 +341,66 @@ mod tests {
         }
     }
 
-    fn assert_message_then_padding(bytes: &[u8], chunk: usize) {
+    /// Deterministic sink with a staging buffer: `write` accepts bytes into
+    /// the stage, and `flush` either delivers the stage or fails before
+    /// delivery. A failed flush therefore models a buffer whose contents are
+    /// still pending, not bytes that were lost.
+    #[derive(Clone)]
+    struct FlushFailSink {
+        staged: Arc<Mutex<Vec<u8>>>,
+        delivered: Arc<Mutex<Vec<u8>>>,
+        fail_flushes: Arc<Mutex<usize>>,
+        flush_calls: Arc<Mutex<usize>>,
+    }
+
+    impl FlushFailSink {
+        fn new(fail_flushes: usize) -> Self {
+            Self {
+                staged: Arc::new(Mutex::new(Vec::new())),
+                delivered: Arc::new(Mutex::new(Vec::new())),
+                fail_flushes: Arc::new(Mutex::new(fail_flushes)),
+                flush_calls: Arc::new(Mutex::new(0)),
+            }
+        }
+
+        fn delivered(&self) -> Vec<u8> {
+            self.delivered.lock().unwrap().clone()
+        }
+
+        fn flush_calls(&self) -> usize {
+            *self.flush_calls.lock().unwrap()
+        }
+    }
+
+    impl Write for FlushFailSink {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.staged.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            *self.flush_calls.lock().unwrap() += 1;
+            let mut remaining = self.fail_flushes.lock().unwrap();
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Err(io::Error::other("injected flush failure"));
+            }
+            drop(remaining);
+            let mut staged = self.staged.lock().unwrap();
+            self.delivered.lock().unwrap().append(&mut staged);
+            Ok(())
+        }
+    }
+
+    fn assert_messages_then_padding(bytes: &[u8], messages: usize, chunk: usize) {
         assert_eq!(bytes.len(), chunk);
-        assert!(bytes[..16].iter().all(|byte| *byte == 1));
-        assert!(bytes[16..].iter().all(|byte| *byte == 0));
+        let message_bytes = messages * 16;
+        assert!(bytes[..message_bytes].iter().all(|byte| *byte == 1));
+        assert!(bytes[message_bytes..].iter().all(|byte| *byte == 0));
+    }
+
+    fn assert_message_then_padding(bytes: &[u8], chunk: usize) {
+        assert_messages_then_padding(bytes, 1, chunk);
     }
 
     fn sha256_hex(bytes: &[u8]) -> String {
@@ -410,6 +466,66 @@ mod tests {
             writer.checksum_hex().as_deref(),
             Some(sha256_hex(&sink.bytes()).as_str())
         );
+    }
+
+    #[test]
+    fn flush_failure_keeps_accepted_bytes_and_retry_delivers_each_once() {
+        let sink = FlushFailSink::new(1);
+        let mut writer = AlignedSbeWriter::from_writer(sink.clone(), 1024).unwrap();
+        writer.enable_checksum().unwrap();
+        writer.write_msg(&TestMessage).unwrap();
+
+        let error = writer.flush().unwrap_err();
+        assert!(
+            error.to_string().contains("injected flush failure"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(writer.bytes_written(), 16);
+        assert!(
+            sink.delivered().is_empty(),
+            "a failed flush must not deliver the staged bytes"
+        );
+
+        // The failed flush left the bytes pending. Appending another message
+        // before the retry must not repeat or reorder the first one.
+        writer.write_msg(&TestMessage).unwrap();
+        writer.flush().unwrap();
+        assert_eq!(writer.bytes_written(), 32);
+        assert_eq!(sink.delivered().len(), 32);
+        assert!(sink.delivered()[..32].iter().all(|byte| *byte == 1));
+
+        writer.finish().unwrap();
+        assert_messages_then_padding(&sink.delivered(), 2, 1024);
+        assert_eq!(
+            writer.checksum_hex().as_deref(),
+            Some(sha256_hex(&sink.delivered()).as_str())
+        );
+    }
+
+    #[test]
+    fn finish_retry_after_flush_failure_delivers_the_padded_chunk_once() {
+        let sink = FlushFailSink::new(1);
+        let mut writer = AlignedSbeWriter::from_writer(sink.clone(), 1024).unwrap();
+        writer.write_msg(&TestMessage).unwrap();
+
+        let error = writer.finish().unwrap_err();
+        assert!(
+            error.to_string().contains("injected flush failure"),
+            "unexpected error: {error:#}"
+        );
+        assert_eq!(writer.bytes_written(), 1024);
+        assert!(sink.delivered().is_empty());
+
+        writer.finish().unwrap();
+        assert_message_then_padding(&sink.delivered(), 1024);
+        assert_eq!(writer.bytes_written(), 1024);
+
+        // A further finish re-flushes an empty stage and must not append a
+        // second chunk.
+        let calls = sink.flush_calls();
+        writer.finish().unwrap();
+        assert_eq!(sink.delivered().len(), 1024);
+        assert_eq!(sink.flush_calls(), calls + 1);
     }
 
     #[test]

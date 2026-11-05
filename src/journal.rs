@@ -2252,6 +2252,42 @@ mod tests {
     }
 
     #[test]
+    fn storage_flush_failure_marks_run_failed() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut config = test_config(temp.path());
+        config.sync_mode = SyncMode::Always;
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::Flush {
+                bail!("simulated flush failure");
+            }
+            Ok(())
+        });
+        let handle = JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"record",
+            DecodeOutcome::decoded(1),
+        );
+        wait_failed(&handle);
+        let status = handle.status();
+        assert!(!status.healthy());
+        assert!(
+            status
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("simulated flush failure")),
+            "{:?}",
+            status.last_error
+        );
+        let verification = verify_run(&run_directory(temp.path(), "run")).expect("verify");
+        assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+    }
+
+    #[test]
     fn queue_saturation_then_shutdown_stays_failed() {
         let temp = TempDir::new().expect("tempdir");
         let (release_tx, release_rx) = mpsc::channel();

@@ -108,7 +108,7 @@ Tasks:
 - [x] Add a deterministic partial-write test double.
 - [x] Test writes returning short counts until completion.
 - [x] Test write errors before any bytes and after partial bytes.
-- [ ] Test failed flush and sync.
+- [x] Test failed flush and sync.
 - [ ] Test directory and manifest metadata failure.
 - [ ] Test rotation failure and rename failure.
 - [ ] Test queue saturation followed by ordinary shutdown.
@@ -122,7 +122,7 @@ Tasks:
 
 Exit: short writes, write/sync/rotation/manifest failures, physical disk exhaustion, crash/restart and recovery have deterministic tests and evidence. A failed run cannot be finalized or reported complete.
 
-Evidence so far: [`docs/verification-2026-11-05-jh4-short-writes.md`](../verification-2026-11-05-jh4-short-writes.md).
+Evidence so far: [`docs/verification-2026-11-05-jh4-short-writes.md`](../verification-2026-11-05-jh4-short-writes.md) and [`docs/verification-2026-11-05-jh4-flush-sync.md`](../verification-2026-11-05-jh4-flush-sync.md).
 
 ### G4 — Unified input log and replay
 
