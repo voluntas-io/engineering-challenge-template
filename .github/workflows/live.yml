@@ -9,7 +9,7 @@ permissions:
 jobs:
   polymarket:
     name: Polymarket public discovery and websocket
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out source

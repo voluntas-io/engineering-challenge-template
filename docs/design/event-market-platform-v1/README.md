@@ -36,7 +36,9 @@ At the time of review:
 | `polymarket-continuity-failure` | `e19a85c` | 16 commits ahead of `main`, 0 behind |
 | PR #2 | merged into `polymarket-continuity-failure` | Merge commit `e19a85c` |
 
-The journal hardening source head `5924eb6` had passing Rust CI and architecture Actions. The merge commit and source head have the same Git tree. The reported run covered 221 library tests, 12 mock E2E tests, and 2 replay tests: 235 passed, 3 ignored; the architecture gate reported 238 attributed tests. This is CI evidence for that tree, not a fresh local build performed for this design. The integration branch has **not** reached `main`.
+> **Status update (2026-11-05):** Phase 0 is complete. `main` fast-forwarded from `9ab6cd5` to `275f78f`, then accepted the assurance baseline and the first JH-4 storage-correctness group. `polymarket-continuity-failure` and `journal-failure-hardening` were retired after ancestry and open-PR checks. Only `main` remains as a permanent branch; topic branches are short-lived. History is linear from `275f78f`, while merge commits `20b4a01` and `e19a85c` are retained as historical evidence. The table above records the review-time state, not the current ref set.
+
+The journal hardening source head `5924eb6` had passing Rust CI and architecture Actions. The merge commit and source head have the same Git tree. The reported run covered 221 library tests, 12 mock E2E tests, and 2 replay tests: 235 passed, 3 ignored; the architecture gate reported 238 attributed tests. This is CI evidence for that tree, not a fresh local build performed for this design. At review time, the integration branch had **not** reached `main`; the status update above records its later promotion.
 
 Relevant branch work separates into three areas:
 
@@ -44,11 +46,11 @@ Relevant branch work separates into three areas:
 - Continuity/failover and clockless recovery fencing (`ce61a34e`, `36a0cfff`, `74140c48`, `ce6f2433`, `13bc7e0d`).
 - Raw-frame journal and hardening (`4362283d` through `e19a85c`).
 
-The current integration branch is useful as a review baseline. Do not silently merge the full 16-commit bundle into `main` under one review objective. Land it as a tested stack or explicitly accept a single integration PR with a commit-group review plan.
+The integration range served as the review baseline. The Phase 0 promotion record documents the commit-group review and the fast-forward from `9ab6cd5` to `275f78f`; later changes use short-lived topic branches and squash merges.
 
 ### 1.2 What the code already does
 
-The integration branch contains:
+The promoted baseline contains:
 
 - Polymarket public Gamma discovery and CLOB market-data WebSocket adapters, plus Kalshi adapters.
 - A synchronous `CollectorCore` used by live collection and normalized JSONL replay.

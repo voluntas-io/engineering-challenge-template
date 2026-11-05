@@ -6,9 +6,11 @@ One behavioral objective per PR. Each PR includes a regression test, source-pinn
 
 The [assurance baseline](../../assurance/README.md) applies to every phase: requirements and evidence precede implementation, Rust correctness rules are mandatory, financial controls are explicit, and verification records pin the reviewed commit. A phase gate is not satisfied by a successful build alone.
 
-## Phase 0 — Land and freeze the current collector
+## Phase 0 — Land and freeze the current collector (complete)
 
 **Objective:** move the integration baseline to `main` without conflating independent behavior.
+
+**Status (2026-11-05):** Complete. The reviewed 18-commit range was promoted after audit and local verification; `main` fast-forwarded from `9ab6cd5` to `275f78f`. `polymarket-continuity-failure` and `journal-failure-hardening` are retired. See [`docs/verification-2026-11-02-phase0-promotion.md`](../../verification-2026-11-02-phase0-promotion.md).
 
 Current source refs to review:
 
@@ -23,9 +25,9 @@ Suggested PR stack:
 3. Raw journal. Review capture boundary, append semantics, manifest, verifier and failure handling.
 4. Journal follow-up hardening is already merged into the integration branch via PR #2; preserve its evidence and source history.
 
-The exact cherry-pick/stack arrangement must respect commit dependencies. Do not cherry-pick only a leaf commit without its required parent changes. If GitHub review cannot accept the stack cleanly, create integration PRs in dependency order. The integration branch currently sits 16 commits ahead of `main`; PR #2 merged only into that branch.
+The exact cherry-pick/stack arrangement must respect commit dependencies. Do not cherry-pick only a leaf commit without its required parent changes. If GitHub review cannot accept the stack cleanly, create integration PRs in dependency order. At review time the integration branch sat 16 commits ahead of `main`; PR #2 merged only into that branch. That state is historical and no longer describes the repository.
 
-**Exit gate:** current branch code is on `main`; CI passes on the exact merge commit; docs identify the correct baseline; no unsupported capacity/live claims remain.
+**Exit gate (met at `275f78f`):** current branch code is on `main`; CI passes on the exact merge commit; docs identify the correct baseline; no unsupported capacity/live claims remain.
 
 ## Phase 1 — Data contract foundation
 

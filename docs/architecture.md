@@ -345,7 +345,7 @@ The generated inventories are part of this contract:
 
 - [`docs/architecture/source-inventory.md`](architecture/source-inventory.md) records each Rust file, responsibility, and crate-root reachability.
 - [`docs/architecture/test-inventory.md`](architecture/test-inventory.md) records each statically declared `#[test]` / `#[tokio::test]` and whether it is reachable from a Cargo test target.
-- [`docs/architecture/phase2-integration-audit-2026-10-26.md`](architecture/phase2-integration-audit-2026-10-26.md) records the current blocker list and required integration order.
+- [`docs/architecture/integration-audit-2026-10-26.md`](architecture/integration-audit-2026-10-26.md) records the current blocker list and required integration order.
 - [`docs/requirement-test-matrix.md`](requirement-test-matrix.md) and the dated verification records provide scope-specific evidence and non-claims; they must be reconciled after this source tree builds.
 
 ## 11. Capacity and production boundary — what this diagram does not imply

@@ -31,6 +31,7 @@ The framework is additive. Historical verification records, commit messages, fix
 | [`verification-2026-11-02-pack.md`](verification-2026-11-02-pack.md) | Historical verification of the assurance pack before integration |
 | [`verification-2026-11-05-integration.md`](verification-2026-11-05-integration.md) | Local integration verification and baseline disposition |
 | [`reports/english-audit-2026-11-05-main-3da31e8.json`](reports/english-audit-2026-11-05-main-3da31e8.json) | Machine-readable baseline audit |
+| [`reports/project-language-audit-2026-11-02.json`](reports/project-language-audit-2026-11-02.json) | Historical machine-readable remote audit metadata |
 | [`ci/quality-gate.proposed.yml`](ci/quality-gate.proposed.yml) | Proposed non-blocking CI job; not installed |
 
 The audit tooling is in [`scripts/assurance/`](../../scripts/assurance/). The glossary is section 8 of the terminology standard.

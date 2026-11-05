@@ -5,7 +5,7 @@
 **Git tree:** `52aecd149b131e98baa9ee3cbbfaa08004227ec4`
 **Scope:** 133 tracked blobs, including 9 SVG architecture diagrams; 60 commits reachable from `main`.
 
-> **Integration note (2026-11-05):** This document records the historical remote audit at the stated commit. The integrated scanner now restricts candidate checks to authored prose and comments, so local counts differ from the remote sweep. The one-line source correction remains a separate change. See [`verification-2026-11-05-integration.md`](verification-2026-11-05-integration.md).
+> **Integration note (2026-11-05):** This document records the historical remote audit at the stated commit. The integrated scanner now restricts candidate checks to authored prose and comments, so local counts differ from the remote sweep. The one-line source correction landed in `9f44990` (PR #6); the patch artefact was not retained. The machine-readable historical metadata is in [`reports/project-language-audit-2026-11-02.json`](reports/project-language-audit-2026-11-02.json). The current baseline is in [`verification-2026-11-05-integration.md`](verification-2026-11-05-integration.md).
 
 ## Method
 
