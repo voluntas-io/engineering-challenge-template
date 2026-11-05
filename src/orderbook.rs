@@ -304,7 +304,7 @@ mod tests {
             "failed replace must leave the book unchanged"
         );
 
-        // Duplicate asks are malformed too, with the same exact error.
+        // Duplicate asks are malformed too, with the same error.
         let mut snapshot = BookSnapshot::default();
         snapshot.bids.push(Level {
             price: 400_000,
