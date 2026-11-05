@@ -90,3 +90,20 @@ record does not claim that they have.
 - Child-process restart and incomplete-run disposition.
 - Recovery idempotency across the journal and manifest layers.
 - Agreement among report, manifest, segment counts and verifier disposition.
+
+## 7. Merge verification
+
+- Pull request: #9.
+- Reviewed head: `ee3df749a750cb570cb5ea1e216afc262292f3c3`.
+- Squash merge on `main`: `c0f24b7fbaa93436326e4778648f835dcc3d7335`.
+- The reviewed head and the merge commit have the same Git tree:
+  `4b10338998e5acb3816ddb96d2fe270501298a74`.
+- Required checks on the PR head passed: `Format, lint, test, release build`
+  ([run 42040337132](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040337132)),
+  `Traceability and Mermaid validation`
+  ([run 42040337144](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040337144)),
+  `Dependency Quality`, `License Compliance` and `Security Analysis`.
+- Post-merge `main` runs succeeded:
+  [CI 42040684945](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040684945)
+  and
+  [Architecture 42040684847](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040684847).

@@ -4,7 +4,7 @@
 
 **Historical baseline:** `kj111422/engineering-challenge-template` `main` at `9ab6cd5a584fea58c0086efa50d55c796e9aac4` (2026-10-26). Test counts and run links below remain tied to that historical commit.
 
-**Current verified baseline:** `main` at `99213e13070b505f9b8f176d66784c7a91eb8eaf` (2026-11-05), with the assurance baseline and the first JH-4 short-write group integrated.
+**Current verified baseline:** `main` at `c0f24b7fbaa93436326e4778648f835dcc3d7335` (2026-11-05), with the assurance baseline and the first two JH-4 groups (short writes, flush and sync failures) integrated.
 
 **Primary objective:** Turn the challenge collector into a reliable Polymarket market-data, research, risk, and controlled-execution platform.
 
@@ -20,10 +20,10 @@ The current application is a Rust market-data collector. It includes Gamma keyse
 
 The current `main` commit has passing GitHub Actions runs for the Rust CI workflow and architecture workflow:
 
-- [CI — `99213e1`](https://github.com/kj111422/engineering-challenge-template/actions/runs/42037909534)
-- [Architecture documentation — `99213e1`](https://github.com/kj111422/engineering-challenge-template/actions/runs/42037909469)
+- [CI — `c0f24b7`](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040684945)
+- [Architecture documentation — `c0f24b7`](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040684847)
 
-The current suite records 239 passing tests and 3 ignored opt-in tests; the architecture gate inventories 242 test functions. Earlier milestones remain on record: the continuity branch at `4362283` recorded 220 passing and 3 ignored ([Rust CI](https://github.com/kj111422/engineering-challenge-template/actions/runs/40956405372), [architecture](https://github.com/kj111422/engineering-challenge-template/actions/runs/40956405414)). A green build establishes that the tested source compiles and the checked invariants hold; it does not prove that a long-running live feed is complete or that the application can trade safely.
+The current suite records 242 passing tests and 3 ignored opt-in tests; the architecture gate inventories 245 test functions. Earlier milestones remain on record: the continuity branch at `4362283` recorded 220 passing and 3 ignored ([Rust CI](https://github.com/kj111422/engineering-challenge-template/actions/runs/40956405372), [architecture](https://github.com/kj111422/engineering-challenge-template/actions/runs/40956405414)). A green build establishes that the tested source compiles and the checked invariants hold; it does not prove that a long-running live feed is complete or that the application can trade safely.
 
 ### Explicit current limitations
 

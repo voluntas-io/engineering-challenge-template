@@ -97,9 +97,9 @@ symbols. The public Polymarket network test is opt-in:
 RUN_LIVE_TESTS=1 cargo test --test live_polymarket -- --ignored --nocapture
 ```
 
-The current `main` commit (`88d4fa6`) has passing GitHub Actions runs for
-[Rust CI](https://github.com/kj111422/engineering-challenge-template/actions/runs/42036075635)
-and [architecture validation](https://github.com/kj111422/engineering-challenge-template/actions/runs/42036075637).
+The current `main` commit (`c0f24b7`) has passing GitHub Actions runs for
+[Rust CI](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040684945)
+and [architecture validation](https://github.com/kj111422/engineering-challenge-template/actions/runs/42040684847).
 The separate live public-feed smoke test last passed in
 [run 40168059177](https://github.com/kj111422/engineering-challenge-template/actions/runs/40168059177)
 on an earlier source commit; treat that as live-feed evidence for that commit,
