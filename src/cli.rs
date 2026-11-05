@@ -201,6 +201,15 @@ pub enum JournalCommand {
         #[arg(value_name = "RUN")]
         run: PathBuf,
     },
+    /// Classify a stopped writer's unfinished run as incomplete.
+    ///
+    /// Run this only after the process that owned the journal has terminated.
+    /// This command does not salvage partial or unmanifested segments.
+    Recover {
+        /// Journal run directory containing `manifest.json`.
+        #[arg(value_name = "RUN")]
+        run: PathBuf,
+    },
 }
 
 impl Cli {
@@ -296,5 +305,29 @@ impl Cli {
             .validate()
             .context("validating command-line overrides")?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cli, Command, JournalCommand};
+    use clap::Parser;
+    use std::path::Path;
+
+    #[test]
+    fn journal_recover_command_requires_a_run_directory() {
+        let cli = Cli::try_parse_from([
+            "engineering-challenge",
+            "journal",
+            "recover",
+            "/var/lib/prediction/journal/run-1",
+        ])
+        .expect("parse journal recover command");
+        assert!(matches!(
+            cli.command,
+            Some(Command::Journal {
+                command: JournalCommand::Recover { run }
+            }) if run == Path::new("/var/lib/prediction/journal/run-1")
+        ));
     }
 }

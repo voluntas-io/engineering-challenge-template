@@ -408,6 +408,8 @@ impl JournalHandle {
             enqueue_timeout_ms: duration_ms(config.enqueue_timeout),
         };
         let manifest = Manifest::new(&meta, &durability);
+        run_fault(fault.as_ref(), FaultPoint::ManifestWrite)
+            .context("injecting initial journal manifest write")?;
         write_manifest(&run_directory, &manifest)?;
 
         let (queue, queue_rx) = bounded(config.queue_capacity);
@@ -994,7 +996,7 @@ impl SegmentWriter {
         Ok(framed)
     }
 
-    fn finalize(mut self) -> anyhow::Result<ManifestSegment> {
+    fn finalize(mut self, fault: Option<&FaultHook>) -> anyhow::Result<ManifestSegment> {
         self.file.flush().context("flushing journal segment")?;
         self.file
             .get_ref()
@@ -1029,6 +1031,7 @@ impl SegmentWriter {
             .context("closing journal segment")?
             .sync_all()
             .context("syncing journal segment footer")?;
+        run_fault(fault, FaultPoint::SegmentRename)?;
         fs::rename(&self.partial_path, &self.final_path).with_context(|| {
             format!(
                 "renaming journal segment `{}` to `{}`",
@@ -1036,7 +1039,9 @@ impl SegmentWriter {
                 self.final_path.display()
             )
         })?;
+        run_fault(fault, FaultPoint::AfterSegmentRename)?;
         if let Some(parent) = self.final_path.parent() {
+            run_fault(fault, FaultPoint::DirectorySync)?;
             sync_directory(parent)?;
         }
         Ok(ManifestSegment {
@@ -1070,6 +1075,13 @@ enum FaultPoint {
     Flush,
     Sync,
     Finalize,
+    ManifestWrite,
+    SegmentRename,
+    DirectorySync,
+    AfterRecordWrite,
+    AfterSegmentRename,
+    AfterManifestUpdate,
+    AfterFinalManifestUpdate,
 }
 
 fn run_fault(hook: Option<&FaultHook>, point: FaultPoint) -> anyhow::Result<()> {
@@ -1122,6 +1134,12 @@ fn run_writer(
                                 status.counters.bytes =
                                     status.counters.bytes.saturating_add(framed);
                                 status.counters.queue_depth = queue.len() as u64;
+                            }
+                            if let Err(error) =
+                                run_fault(fault.as_ref(), FaultPoint::AfterRecordWrite)
+                            {
+                                fail(&inner, &mut manifest, &error);
+                                return;
                             }
                             if config.sync_mode == SyncMode::Always {
                                 if let Err(error) =
@@ -1178,19 +1196,19 @@ fn run_writer(
                     if let Some(reason) = run_failure(&inner) {
                         fail_reason(&inner, &mut manifest, &reason);
                     } else {
-                        set_state(
+                        mark_incomplete(
                             &inner,
-                            RunState::Incomplete,
-                            Some("journal stopped without finalization".to_owned()),
+                            &mut manifest,
+                            "journal stopped without finalization",
                         );
                     }
                     return;
                 }
                 Err(_) => {
-                    set_state(
+                    mark_incomplete(
                         &inner,
-                        RunState::Incomplete,
-                        Some("journal writer lost all handles before finalization".to_owned()),
+                        &mut manifest,
+                        "journal writer lost all handles before finalization",
                     );
                     return;
                 }
@@ -1270,10 +1288,15 @@ fn rotate_segment(
     run_fault(fault, FaultPoint::Finalize)?;
     let replacement = SegmentWriter::open(&inner.run_directory, next_index, meta)?;
     let previous = std::mem::replace(segment, replacement);
-    let entry = previous.finalize()?;
+    let entry = previous.finalize(fault)?;
     let count = entry.record_count;
+    // Publish the manifest before recording the segment in memory. A failed
+    // manifest write must leave the renamed segment uncommitted, so the run
+    // cannot later be reported complete from an in-memory entry.
+    run_fault(fault, FaultPoint::ManifestWrite)?;
     manifest.segments.push(entry);
     write_manifest(&inner.run_directory, manifest)?;
+    run_fault(fault, FaultPoint::AfterManifestUpdate)?;
     let mut status = inner
         .status
         .lock()
@@ -1294,7 +1317,7 @@ fn finalize_run(
         bail!("journal run failed before finalization: {reason}");
     }
     run_fault(fault, FaultPoint::Finalize)?;
-    let entry = segment.finalize()?;
+    let entry = segment.finalize(fault)?;
     if let Some(reason) = run_failure(inner) {
         manifest.segments.push(entry);
         fail_reason(inner, manifest, &reason);
@@ -1303,7 +1326,12 @@ fn finalize_run(
     manifest.segments.push(entry);
     manifest.state = RunState::Finalized;
     manifest.finalized_at_us = Some(now_us().unwrap_or(0));
+    run_fault(fault, FaultPoint::ManifestWrite)?;
     write_manifest(&inner.run_directory, manifest)?;
+    // This is a process-crash boundary, not a failure of finalization. Once
+    // the finalized manifest is durable, a later hook error must not rewrite
+    // the committed run as Failed. The subprocess test exits here directly.
+    let _ = run_fault(fault, FaultPoint::AfterFinalManifestUpdate);
     let record_count = manifest
         .segments
         .iter()
@@ -1336,6 +1364,21 @@ fn finalize_run(
         segment_count,
         bytes,
     })
+}
+
+fn mark_incomplete(inner: &Inner, manifest: &mut Manifest, reason: &str) {
+    manifest.state = RunState::Incomplete;
+    manifest.failure = Some(reason.to_owned());
+    match write_manifest(&inner.run_directory, manifest) {
+        Ok(()) => set_state(inner, RunState::Incomplete, Some(reason.to_owned())),
+        Err(error) => set_state(
+            inner,
+            RunState::Failed,
+            Some(format!(
+                "{reason}; persisting incomplete journal state failed: {error:#}"
+            )),
+        ),
+    }
 }
 
 fn fail(inner: &Inner, manifest: &mut Manifest, error: &anyhow::Error) {
@@ -1387,6 +1430,47 @@ pub struct SegmentVerification {
     pub first_received_at_us: Option<i64>,
     pub last_received_at_us: Option<i64>,
     pub sources: Vec<SourceRange>,
+}
+
+/// Reconcile a run left by process termination.
+///
+/// The caller MUST first establish that the process which owned this run has
+/// terminated. Recovery does not take a cross-process lease and must not race
+/// a live writer.
+///
+/// Recovery is deliberately conservative: it never promotes a `.partial`
+/// segment or an unmanifested `.pmj` file into the run. `Starting` and `Open`
+/// manifests become `Incomplete`; terminal states are left unchanged. Repeated
+/// calls are idempotent because an `Incomplete`, `Failed`, or `Finalized`
+/// manifest is never rewritten.
+pub fn recover_incomplete_run(run_directory: &Path) -> anyhow::Result<JournalVerification> {
+    let manifest_path = run_directory.join(MANIFEST_FILE);
+    let bytes = fs::read(&manifest_path).with_context(|| {
+        format!(
+            "reading manifest `{}` for recovery",
+            manifest_path.display()
+        )
+    })?;
+    let mut manifest: Manifest = serde_json::from_slice(&bytes).with_context(|| {
+        format!(
+            "parsing manifest `{}` for recovery",
+            manifest_path.display()
+        )
+    })?;
+    anyhow::ensure!(
+        manifest.schema_version == JOURNAL_SCHEMA_VERSION,
+        "unsupported journal manifest schema {}",
+        manifest.schema_version
+    );
+    if matches!(manifest.state, RunState::Starting | RunState::Open) {
+        manifest.state = RunState::Incomplete;
+        manifest.failure.get_or_insert_with(|| {
+            "process ended before journal finalization; recovery did not promote partial or orphan segments".to_owned()
+        });
+        write_manifest(run_directory, &manifest)
+            .context("persisting incomplete disposition during journal recovery")?;
+    }
+    verify_run(run_directory)
 }
 
 /// Verify one run directory against its manifest, segment footers, and record
@@ -1443,18 +1527,31 @@ pub fn verify_run(run_directory: &Path) -> anyhow::Result<JournalVerification> {
             Err(error) => errors.push(format!("segment {}: {error}", expected.file)),
         }
     }
-    if let Ok(entries) = fs::read_dir(run_directory) {
-        for entry in entries.flatten() {
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            if name.ends_with(PARTIAL_SUFFIX) {
-                errors.push(format!("unfinalized segment `{name}`"));
-            } else if name.ends_with(FINAL_SUFFIX)
-                && !manifest.segments.iter().any(|segment| segment.file == name)
-            {
-                errors.push(format!("segment `{name}` is absent from the manifest"));
+    match fs::read_dir(run_directory) {
+        Ok(entries) => {
+            for entry in entries {
+                match entry {
+                    Ok(entry) => {
+                        let name = entry.file_name();
+                        let name = name.to_string_lossy();
+                        if name.ends_with(PARTIAL_SUFFIX) {
+                            errors.push(format!("unfinalized segment `{name}`"));
+                        } else if name.ends_with(FINAL_SUFFIX)
+                            && !manifest.segments.iter().any(|segment| segment.file == name)
+                        {
+                            errors.push(format!("segment `{name}` is absent from the manifest"));
+                        }
+                    }
+                    Err(error) => {
+                        errors.push(format!("reading journal directory entry failed: {error}"))
+                    }
+                }
             }
         }
+        Err(error) => errors.push(format!(
+            "reading journal directory `{}` failed: {error}",
+            run_directory.display()
+        )),
     }
     Ok(JournalVerification {
         schema_version: JOURNAL_SCHEMA_VERSION,
@@ -1808,7 +1905,12 @@ pub fn read_records(run_directory: &Path) -> anyhow::Result<Vec<JournalRecord>> 
 #[cfg(test)]
 mod tests {
     use std::{
-        sync::mpsc,
+        env,
+        process::Command as ProcessCommand,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            mpsc,
+        },
         thread,
         time::{Duration, Instant},
     };
@@ -1891,6 +1993,91 @@ mod tests {
             }
             thread::sleep(Duration::from_millis(10));
         }
+    }
+
+    const CRASH_POINT_ENV: &str = "PMJ_TEST_CRASH_POINT";
+    const CRASH_ROOT_ENV: &str = "PMJ_TEST_CRASH_ROOT";
+    const CRASH_EXIT_CODE: i32 = 86;
+
+    fn spawn_crash_child(root: &Path, point: &str) {
+        let executable = env::current_exe().expect("current test executable");
+        let output = ProcessCommand::new(executable)
+            .arg("--exact")
+            .arg("journal::tests::crash_child_process")
+            .arg("--nocapture")
+            .env(CRASH_POINT_ENV, point)
+            .env(CRASH_ROOT_ENV, root)
+            .output()
+            .expect("spawn crash child");
+        assert_eq!(
+            output.status.code(),
+            Some(CRASH_EXIT_CODE),
+            "child did not terminate at {point}; stdout: {}; stderr: {}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    /// Test-harness subprocess used by `crash_recovery_is_conservative_and_idempotent`.
+    /// `process::exit` bypasses Rust destructors and the journal's orderly
+    /// shutdown path, leaving the files at the selected persistence boundary.
+    #[test]
+    fn crash_child_process() {
+        let Ok(point_name) = env::var(CRASH_POINT_ENV) else {
+            return;
+        };
+        let root = PathBuf::from(env::var_os(CRASH_ROOT_ENV).expect("crash root"));
+        let (target, rotate, finalize) = match point_name.as_str() {
+            "after_record_write" => (FaultPoint::AfterRecordWrite, false, false),
+            "after_segment_rename" => (FaultPoint::AfterSegmentRename, true, false),
+            "after_manifest_update" => (FaultPoint::AfterManifestUpdate, true, false),
+            "after_final_manifest_update" => (FaultPoint::AfterFinalManifestUpdate, false, true),
+            other => panic!("unknown child crash point: {other}"),
+        };
+        let mut config = test_config(&root);
+        if rotate {
+            config.segment_max_bytes = 4096;
+        }
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == target {
+                std::process::exit(CRASH_EXIT_CODE);
+            }
+            Ok(())
+        });
+        let handle = JournalHandle::start_inner(config, meta("crash-run"), Some(hook))
+            .expect("start crash-test journal");
+
+        if rotate {
+            for seq in 1..=8 {
+                append(
+                    &handle,
+                    SourceId::new(0, 0),
+                    1,
+                    seq,
+                    &[b'x'; 1200],
+                    DecodeOutcome::decoded(1),
+                );
+            }
+        } else {
+            append(
+                &handle,
+                SourceId::new(0, 0),
+                1,
+                1,
+                b"crash-boundary-record",
+                DecodeOutcome::decoded(1),
+            );
+        }
+
+        if finalize {
+            let _ = handle.shutdown(Duration::from_secs(3));
+        } else {
+            // The producer only enqueues. Keep the process alive so the writer
+            // thread can reach the requested persistence boundary.
+            thread::sleep(Duration::from_secs(5));
+        }
+        // Returning normally is a failure in the parent: the selected hook
+        // was not reached, so the test did not exercise the intended boundary.
     }
 
     #[test]
@@ -2176,7 +2363,7 @@ mod tests {
         let directory = run_directory(temp.path(), "run");
         let verification = verify_run(&directory).expect("verify");
         assert!(!verification.complete);
-        assert_eq!(verification.state, RunState::Open);
+        assert_eq!(verification.state, RunState::Incomplete);
         assert!(
             verification
                 .errors
@@ -2582,7 +2769,7 @@ mod tests {
         abort.join().expect("abort joined");
         assert_eq!(handle.status().state, RunState::Incomplete);
         let directory = run_directory(temp.path(), "run");
-        wait_for_verification_state(&directory, RunState::Open);
+        wait_for_verification_state(&directory, RunState::Incomplete);
         assert!(!verify_run(&directory).expect("verify").complete);
     }
 
@@ -2992,5 +3179,271 @@ mod tests {
                 .collect::<Vec<_>>()
         };
         assert_eq!(identity(left), identity(right));
+    }
+
+    #[test]
+    fn initial_manifest_failure_leaves_no_recoverable_run() {
+        let temp = TempDir::new().expect("tempdir");
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::ManifestWrite {
+                bail!("injected initial manifest failure");
+            }
+            Ok(())
+        });
+        let result = JournalHandle::start_inner(test_config(temp.path()), meta("run"), Some(hook));
+        assert!(result.is_err());
+        assert!(
+            !run_directory(temp.path(), "run")
+                .join(MANIFEST_FILE)
+                .exists()
+        );
+        assert!(
+            fs::read_dir(run_directory(temp.path(), "run"))
+                .expect("run directory")
+                .next()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn rotation_rename_failure_is_failed_and_never_reported_complete() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut config = test_config(temp.path());
+        config.segment_max_bytes = 4096;
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::SegmentRename {
+                bail!("injected segment rename failure");
+            }
+            Ok(())
+        });
+        let handle =
+            JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start journal");
+        for seq in 1..=8 {
+            if handle.status().state == RunState::Failed {
+                break;
+            }
+            append(
+                &handle,
+                SourceId::new(0, 0),
+                1,
+                seq,
+                &[b'r'; 1200],
+                DecodeOutcome::decoded(1),
+            );
+        }
+        wait_failed(&handle);
+        assert!(handle.shutdown(Duration::from_secs(2)).is_err());
+        let directory = run_directory(temp.path(), "run");
+        let verification = verify_run(&directory).expect("verify failed run");
+        assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+        assert!(
+            verification
+                .errors
+                .iter()
+                .any(|error| error.contains("unfinalized segment"))
+        );
+    }
+
+    #[test]
+    fn directory_sync_failure_leaves_an_uncommitted_segment() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut config = test_config(temp.path());
+        config.segment_max_bytes = 4096;
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::DirectorySync {
+                bail!("injected directory sync failure");
+            }
+            Ok(())
+        });
+        let handle =
+            JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start journal");
+        for seq in 1..=8 {
+            if handle.status().state == RunState::Failed {
+                break;
+            }
+            append(
+                &handle,
+                SourceId::new(0, 0),
+                1,
+                seq,
+                &[b'd'; 1200],
+                DecodeOutcome::decoded(1),
+            );
+        }
+        wait_failed(&handle);
+        let directory = run_directory(temp.path(), "run");
+        let verification = verify_run(&directory).expect("verify failed run");
+        assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+        assert!(
+            verification
+                .errors
+                .iter()
+                .any(|error| error.contains("absent from the manifest"))
+        );
+    }
+
+    #[test]
+    fn manifest_update_failure_does_not_commit_a_renamed_segment() {
+        let temp = TempDir::new().expect("tempdir");
+        let mut config = test_config(temp.path());
+        config.segment_max_bytes = 4096;
+        let manifest_writes = Arc::new(AtomicUsize::new(0));
+        let writes = Arc::clone(&manifest_writes);
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::ManifestWrite && writes.fetch_add(1, Ordering::SeqCst) == 1 {
+                bail!("injected rotated manifest failure");
+            }
+            Ok(())
+        });
+        let handle =
+            JournalHandle::start_inner(config, meta("run"), Some(hook)).expect("start journal");
+        for seq in 1..=8 {
+            if handle.status().state == RunState::Failed {
+                break;
+            }
+            append(
+                &handle,
+                SourceId::new(0, 0),
+                1,
+                seq,
+                &[b'm'; 1200],
+                DecodeOutcome::decoded(1),
+            );
+        }
+        wait_failed(&handle);
+        let directory = run_directory(temp.path(), "run");
+        let verification = verify_run(&directory).expect("verify failed run");
+        assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+        assert!(
+            verification
+                .errors
+                .iter()
+                .any(|error| error.contains("absent from the manifest"))
+        );
+    }
+
+    #[test]
+    fn final_manifest_write_failure_is_failed_and_not_complete() {
+        let temp = TempDir::new().expect("tempdir");
+        let manifest_writes = Arc::new(AtomicUsize::new(0));
+        let writes = Arc::clone(&manifest_writes);
+        let hook: FaultHook = Arc::new(move |point| {
+            if point == FaultPoint::ManifestWrite && writes.fetch_add(1, Ordering::SeqCst) == 1 {
+                bail!("injected final manifest failure");
+            }
+            Ok(())
+        });
+        let handle = JournalHandle::start_inner(test_config(temp.path()), meta("run"), Some(hook))
+            .expect("start journal");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"committed",
+            DecodeOutcome::decoded(1),
+        );
+        let error = handle
+            .shutdown(Duration::from_secs(2))
+            .expect_err("final manifest failure must fail shutdown");
+        assert!(
+            format!("{error:#}").contains("injected final manifest failure"),
+            "unexpected error: {error:#}"
+        );
+        let verification = verify_run(&run_directory(temp.path(), "run")).expect("verify");
+        assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+    }
+
+    #[test]
+    fn crash_recovery_is_conservative_and_idempotent() {
+        for (point, expected_manifest_segments) in [
+            ("after_record_write", 0),
+            ("after_segment_rename", 0),
+            ("after_manifest_update", 1),
+        ] {
+            let temp = TempDir::new().expect("tempdir");
+            spawn_crash_child(temp.path(), point);
+            let directory = run_directory(temp.path(), "crash-run");
+            let before_recovery = verify_run(&directory).expect("verify crashed run");
+            assert_eq!(before_recovery.state, RunState::Open);
+            assert!(!before_recovery.complete);
+            assert_eq!(
+                before_recovery.segment_count, expected_manifest_segments,
+                "unexpected manifest segment count at {point}: {:?}",
+                before_recovery.errors
+            );
+
+            let recovered = recover_incomplete_run(&directory).expect("recover crashed run");
+            assert_eq!(recovered.state, RunState::Incomplete);
+            assert!(!recovered.complete);
+            assert!(
+                recovered
+                    .errors
+                    .iter()
+                    .any(|error| error.contains("Incomplete"))
+            );
+
+            let manifest_after_first_recovery =
+                fs::read(directory.join(MANIFEST_FILE)).expect("read recovered manifest");
+            let recovered_again = recover_incomplete_run(&directory).expect("repeat recovery");
+            let manifest_after_second_recovery =
+                fs::read(directory.join(MANIFEST_FILE)).expect("read manifest again");
+            assert_eq!(
+                manifest_after_first_recovery, manifest_after_second_recovery,
+                "recovery rewrote a terminal manifest at {point}"
+            );
+            assert_eq!(recovered.errors, recovered_again.errors);
+            assert!(!recovered_again.complete);
+        }
+    }
+
+    #[test]
+    fn crash_after_final_manifest_update_keeps_committed_run_finalized() {
+        let temp = TempDir::new().expect("tempdir");
+        spawn_crash_child(temp.path(), "after_final_manifest_update");
+        let directory = run_directory(temp.path(), "crash-run");
+        let before_recovery = verify_run(&directory).expect("verify finalized run");
+        assert!(before_recovery.complete, "{:?}", before_recovery.errors);
+        assert_eq!(before_recovery.state, RunState::Finalized);
+        assert_eq!(before_recovery.record_count, 1);
+
+        let manifest_before = fs::read(directory.join(MANIFEST_FILE)).expect("read manifest");
+        let recovered = recover_incomplete_run(&directory).expect("recover finalized run");
+        let manifest_after = fs::read(directory.join(MANIFEST_FILE)).expect("read manifest");
+        assert!(recovered.complete, "{:?}", recovered.errors);
+        assert_eq!(recovered.state, RunState::Finalized);
+        assert_eq!(manifest_before, manifest_after);
+    }
+
+    #[test]
+    fn post_commit_failure_does_not_downgrade_finalized_run() {
+        let temp = TempDir::new().expect("tempdir");
+        let hook: FaultHook = Arc::new(|point| {
+            if point == FaultPoint::AfterFinalManifestUpdate {
+                bail!("injected post-commit fault");
+            }
+            Ok(())
+        });
+        let handle = JournalHandle::start_inner(test_config(temp.path()), meta("run"), Some(hook))
+            .expect("start journal");
+        append(
+            &handle,
+            SourceId::new(0, 0),
+            1,
+            1,
+            b"committed",
+            DecodeOutcome::decoded(1),
+        );
+        let summary = handle
+            .shutdown(Duration::from_secs(2))
+            .expect("post-commit hook cannot undo finalization");
+        assert_eq!(summary.state, RunState::Finalized);
+        let verification = verify_run(&run_directory(temp.path(), "run")).expect("verify");
+        assert!(verification.complete, "{:?}", verification.errors);
+        assert_eq!(verification.state, RunState::Finalized);
     }
 }

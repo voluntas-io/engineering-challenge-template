@@ -121,6 +121,11 @@ async fn main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
+            JournalCommand::Recover { run } => {
+                let verification = journal::recover_incomplete_run(&run)?;
+                emit_json(&verification)?;
+                Ok(())
+            }
         },
     }
 }

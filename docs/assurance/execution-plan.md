@@ -109,20 +109,20 @@ Tasks:
 - [x] Test writes returning short counts until completion.
 - [x] Test write errors before any bytes and after partial bytes.
 - [x] Test failed flush and sync.
-- [ ] Test directory and manifest metadata failure.
-- [ ] Test rotation failure and rename failure.
-- [ ] Test queue saturation followed by ordinary shutdown.
-- [ ] Test concurrent producer failure latching.
-- [ ] Test kill/crash at record write, segment rotation and manifest update boundaries.
-- [ ] Restart a child process and verify incomplete-run disposition.
-- [ ] Test recovery idempotency.
+- [x] Test directory and manifest metadata failure.
+- [x] Test rotation failure and rename failure.
+- [x] Test queue saturation followed by ordinary shutdown.
+- [x] Test concurrent producer failure latching.
+- [x] Test kill/crash at record write, segment rotation and manifest update boundaries.
+- [x] Restart a child process and verify incomplete-run disposition.
+- [x] Test recovery idempotency.
 - [ ] Exercise quota/filesystem capacity exhaustion on an isolated volume.
 - [ ] State precisely which acknowledged records survive each failure boundary.
 - [ ] Verify report, manifest, segment counts and verifier disposition agree.
 
 Exit: short writes, write/sync/rotation/manifest failures, physical disk exhaustion, crash/restart and recovery have deterministic tests and evidence. A failed run cannot be finalized or reported complete.
 
-Evidence so far: [`docs/verification-2026-11-05-jh4-short-writes.md`](../verification-2026-11-05-jh4-short-writes.md) and [`docs/verification-2026-11-05-jh4-flush-sync.md`](../verification-2026-11-05-jh4-flush-sync.md).
+Evidence so far: [`docs/verification-2026-11-05-jh4-short-writes.md`](../verification-2026-11-05-jh4-short-writes.md), [`docs/verification-2026-11-05-jh4-flush-sync.md`](../verification-2026-11-05-jh4-flush-sync.md) and [`docs/verification-2026-11-05-jh4-recovery.md`](../verification-2026-11-05-jh4-recovery.md).
 
 ### G4 — Unified input log and replay
 
