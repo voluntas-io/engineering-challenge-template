@@ -1,147 +1,90 @@
-# Latency Research — Kalshi WebSocket (Extension 4)
+# Latency Research — My Findings and Next Steps
 
-## Overview
+For Extension 4, I reviewed the collector's timing path and possible ways to
+reduce delivery and recovery delays. My priority is complete, correct market
+data. I have not established a reproducible production latency baseline, so I
+separate implementation findings from experiments I would run next. I do not
+claim a measured advantage from source-port selection, host selection,
+post-maintenance connection timing, or deployment location.
 
-Latency to the exchange matters: for a taker strategy, being 10 ms faster than
-the market means seeing a price move and acting on it before competitors can
-react. This document describes experiments and reasoning around minimizing the
-time between a Kalshi price change happening on the exchange and our collector
-recording it.
+## What my collector currently records
 
----
+In [`src/collector.rs`](src/collector.rs), I capture `received_at` with
+`Utc::now()` after the WebSocket library returns a complete text message and
+before JSON decoding. For accepted deltas, I write this value to the SBE
+`backtest_timestamp` field. It is an application receive timestamp, not a
+kernel packet-arrival timestamp or the time the message reaches disk.
 
-## Methodology
+In [`src/kalshi.rs`](src/kalshi.rs), I read the optional `msg.ts_ms` field and
+pass it to SBE as `exchange_timestamp`. This is different from the envelope's
+`sending_ts_ms`, which my decoder does not currently retain. Kalshi documents
+`ts_ms` as the time the orderbook change was recorded and `sending_ts_ms` as
+the time it queued the message for sending. [Kalshi WebSocket specification][1]
 
-We measure latency as:
+For deltas with a valid exchange timestamp, I could calculate:
 
+```text
+observed event age = backtest_timestamp − exchange_timestamp
 ```
-Δt = received_at (our wall clock) − exchange_ts (Kalshi's sending_ts_ms)
-```
 
-`sending_ts_ms` is "Unix timestamp in milliseconds when Kalshi queued this
-message at the network layer". It is not the time the matching engine processed
-the order, but it is the closest the exchange gives us.
+I would interpret this as an observed age across exchange and local clocks,
+not pure network latency or matching-engine latency. Clock offset, timestamp
+resolution, exchange processing, transport, and local scheduling can affect
+it. I would synchronize the host clock and report its uncertainty before
+comparing small differences.
 
-We log both timestamps in the SBE output (`exchange_timestamp` vs
-`backtest_timestamp`), enabling offline analysis.
+If `ts_ms` is absent or invalid, my collector substitutes `received_at`.
+Those records produce a zero difference by construction, not evidence of
+instant delivery. The SBE message does not preserve a flag identifying that
+fallback. I would add timestamp provenance before producing latency statistics.
+I would also exclude snapshots from this calculation: the current snapshot
+paths supply a local timestamp as `exchange_timestamp`.
 
----
+## What redundancy provides today
 
-## Experiment 1 — TCP Source Port Selection
+I maintain a primary and a subscribed shadow connection for each bucket. Only
+primary events update the canonical book and output. On primary disconnection,
+I promote the other socket, request a fresh snapshot when its subscription ID
+is available, emit the current in-memory book, and replace the failed socket.
 
-**Hypothesis:** TCP path selection through Kalshi's load balancer may differ
-based on the client source port. Some ports may land on closer or less-loaded
-backend nodes.
+This avoids requiring a new connection handshake before promotion, but it does
+not guarantee a healthy backup, immediate resynchronization, or lossless
+failover. My collector does not select the fastest socket or race both feeds.
+Older clocks are rejected before state mutation and SBE output; equal clocks
+may still pass. That is not complete duplicate or sequence-gap detection.
 
-**Method:**
-1. Open N parallel WebSocket connections to `external-api-ws.kalshi.com`.
-2. Subscribe each to the same set of high-volume markets.
-3. For each delta, record `(connection_id, received_at − exchange_ts)`.
-4. After 10 minutes, compare median and p99 latency per connection.
+## What I would measure next
 
-**Findings:** In preliminary testing we observed variance of 2–8 ms across
-connections opened within seconds of each other. This suggests that the load
-balancer does route connections to different backend instances. The redundant
-socket architecture (Extension 1) maintains two connections for recovery.
-The current collector only applies primary-socket data; it does not select the
-fastest connection or race updates from both sockets. These preliminary latency
-figures are author-reported and have not been independently reproduced.
+| Experiment | How I would evaluate it | Current status |
+| --- | --- | --- |
+| Parallel connections and source ports | Match the same events across sockets and compare arrival times, disconnects, and recovery. Record ports and control other variables before attributing differences to routing. | Not measured reproducibly; fastest-feed selection is unimplemented. |
+| Deployment location | Compare candidate regions using the same markets and observation windows; record RTT and application event-age distributions separately. | No verified exchange region or sub-millisecond RTT claim. |
+| Reconnect preparation | Measure DNS, TCP/TLS/WebSocket setup, subscription, and fresh-snapshot completion separately. Evaluate DNS caching while respecting DNS changes and TLS hostname validation. | No measured improvement claimed. |
+| TCP_NODELAY | Compare otherwise identical connections with and without it; measure outgoing command and recovery behavior as well as feed arrival. My client's setting cannot control exchange-side buffering. | My `connect_async(request)` call does not explicitly enable it. |
+| Maintenance recovery | Observe documented exchange-status fields and rebuild a fresh baseline after maintenance before comparing subsequent events. | No automatic maintenance-triggered reconnect policy or measured timing advantage. |
 
-**Recommendation:** Open 3–4 redundant connections per bucket and always read
-from the one with the lowest recent median `Δt`. Rotate the "primary" role to
-whichever connection has been fastest over the last 30 seconds.
+The earlier statement that `TCP_NODELAY` was already enabled by default was
+incorrect: in tokio-tungstenite 0.26.2, `connect_async` passes
+`disable_nagle = false`. I would need to configure it explicitly and measure
+its effect. [Dependency source][2]
 
----
+For maintenance monitoring, I would use fields such as `exchange_active` and
+`trading_active`, rather than the previously listed string states. [Exchange
+status API][3] I would also account for the documented possibility of market
+clocks decreasing during maintenance when designing recovery. [Orderbook
+update rules][4]
 
-## Experiment 2 — Connection Timing (Post-Maintenance)
+## My conclusion
 
-**Hypothesis:** Kalshi performs scheduled maintenance periodically. Immediately
-after maintenance ends, the exchange process is freshly started, its memory
-footprint is minimal, and queues are empty. Connections established first may
-get better server-side scheduling.
+I have implemented redundancy and recovery, but I have not demonstrated a
+production latency improvement. Before optimizing, I would add timestamp
+provenance, per-connection event identity, and monotonic measurements of local
+processing and output stages. I would then publish the capture conditions,
+sample counts, p50/p95/p99 results, and recovery observations alongside the raw
+data. Local benchmark completion would remain separate from those live-feed
+measurements.
 
-**Method:**
-1. Monitor the Kalshi exchange status endpoint for maintenance mode.
-2. The instant maintenance clears, open connections as fast as possible.
-3. Compare latency for connections opened ≤ 1 s vs > 5 s after maintenance.
-
-**Findings:** Difficult to test without coordinated maintenance timing. Anecdotal
-reports from crypto market participants suggest a 1–3 ms advantage for the
-first connections after maintenance on similar prediction markets.
-
-**Recommendation:** Monitor `GET /exchange/status`. On transition from
-`maintenance_scheduled` or `maintenance_active` to `open`, initiate an
-emergency reconnect of all WebSocket sockets with sub-second timeout.
-
----
-
-## Experiment 3 — Dedicated IP vs Shared Host
-
-Kalshi offers:
-- `external-api-ws.kalshi.com` — dedicated external API host (recommended)
-- `api.elections.kalshi.com`   — shared host (legacy)
-
-**Finding:** The dedicated host resolves to different IPs than the legacy host.
-In our tests the dedicated host shows consistently lower median latency (≈5 ms
-improvement), confirming the official recommendation. Always use the dedicated
-host.
-
----
-
-## Experiment 4 — DNS Pre-Resolution and TCP Pre-Warm
-
-Standard TLS WebSocket handshakes add 2–3 round trips (TCP SYN, TLS ClientHello,
-TLS Finished). We can shorten the **reconnect** latency after a failure by:
-
-1. **Keep-alive pool**: maintain idle authenticated WebSocket connections that
-   are ready to subscribe immediately on failover.
-2. **DNS caching**: resolve `external-api-ws.kalshi.com` once and cache the IP;
-   avoid DNS lookup latency on reconnect.
-3. **TCP_NODELAY**: disable Nagle's algorithm. The tokio-tungstenite default is
-   to set `TCP_NODELAY`, which is correct for low-latency WebSocket workloads.
-
-**Implementation note:** Our redundant socket design (Extension 1) already acts
-as a warm-standby pool — the shadow socket is fully subscribed and receiving
-data before promotion. Promotion avoids waiting for a new connection handshake,
-but recovery also requires processing queued events and receiving a fresh
-snapshot. This mechanism does not guarantee zero message loss.
-
----
-
-## Experiment 5 — Co-location
-
-The ultimate latency improvement is physical proximity to the exchange servers.
-
-- Kalshi's production API resolves to AWS us-east-1 (Northern Virginia).
-- Running the collector in the same AWS region (or on a bare-metal VPS at
-  Equinix DC3/DC5 in Ashburn, VA) provides RTT ≤ 1 ms to the exchange.
-- Our current test machine (European residential) shows RTTs of 90–110 ms, so
-  all improvements above are dwarfed by the geographic component.
-
-**Recommendation for production:** Deploy in `us-east-1`. Use an EC2 instance
-type with enhanced networking (e.g. `c7gn.xlarge` for 100 Gbps ENA).
-
----
-
-## Summary Table
-
-| Technique                        | Expected Improvement | Implementation Cost |
-|----------------------------------|----------------------|---------------------|
-| Dedicated API host               | ~5 ms                | Zero (already done) |
-| Redundant sockets                | Recovery benefit; fastest-path selection unimplemented | Redundancy implemented |
-| TCP_NODELAY                      | <1 ms                | Zero (tungstenite default) |
-| DNS caching                      | ~1 ms on reconnect   | Low                 |
-| Post-maintenance fast reconnect  | ~2 ms                | Medium              |
-| Co-location (us-east-1)          | ~90–110 ms           | High (infra change) |
-| Source-port tournament           | ~2–5 ms              | Medium              |
-
----
-
-## Conclusion
-
-The highest-leverage action is **co-location** (reducing geographic RTT from
-100 ms to <1 ms). Within a co-located setup, maintaining multiple redundant
-connections and reading from whichever arrives first provides an additional
-2–5 ms edge. The redundant socket design in this collector already provides
-the structural foundation for this strategy.
-
+[1]: https://docs.kalshi.com/asyncapi.yaml
+[2]: https://docs.rs/tokio-tungstenite/0.26.2/src/tokio_tungstenite/connect.rs.html
+[3]: https://docs.kalshi.com/api-reference/exchange/get-exchange-status
+[4]: https://docs.kalshi.com/websockets/orderbook-updates
