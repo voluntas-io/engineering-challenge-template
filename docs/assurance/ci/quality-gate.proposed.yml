@@ -1,0 +1,44 @@
+# Proposal only. Add to .github/workflows after the local baseline audit is reviewed.
+name: English audit baseline report
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assurance-language-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  english-audit:
+    name: Tracked-tree English audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test audit tool
+        run: python3 -m unittest discover -s scripts/assurance -p 'test_*.py' -v
+      - name: Run tracked-tree and PR commit audit
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}"
+          python3 scripts/assurance/english_audit.py \
+            --repo . \
+            --history-range "origin/${BASE_REF}..HEAD" \
+            --json-out build/english-audit.json
+      - name: Upload review report
+        if: always() # english-audit-ignore: GitHub Actions expression syntax
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: english-audit-${{ github.sha }}
+          path: build/english-audit.json
+          if-no-files-found: ignore

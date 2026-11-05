@@ -5,3 +5,6 @@ captures/
 # Python validation scripts
 __pycache__/
 *.py[cod]
+
+# Local assurance audit output
+/build/

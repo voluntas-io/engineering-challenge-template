@@ -16,6 +16,12 @@ The common core is a venue-neutral event log and deterministic state-transition 
 
 This document is an engineering proposal. ADRs are proposed, not accepted. No live order management, risk service, ledger or signer is claimed to exist.
 
+### Assurance baseline
+
+The engineering baseline in [`docs/assurance/`](../../assurance/README.md) extends this charter with a controlled software lifecycle, Rust correctness rules, financial-market controls, canonical terminology, audit tooling and verification records. It covers software assurance, requirements traceability, electronic trading, financial risk, market integrity, custody, settlement and multi-tenant operation.
+
+The baseline uses NASA, NIST, CPMI-IOSCO, SEC, SEBI, CFTC and FIX publications as references with different scopes. It does not claim NASA certification, regulatory compliance, exchange membership or production readiness. Applicability to a venue, product, customer class or jurisdiction requires legal and compliance review.
+
 ---
 
 ## 1. Current repository state: code, not aspiration
@@ -313,6 +319,7 @@ The full implementation plan is in [`roadmap.md`](roadmap.md). The order is deli
 - [`security-and-operations.md`](security-and-operations.md) — trust boundaries, eligibility, custody, monitoring and evidence gates.
 - [`roadmap.md`](roadmap.md) — PR stack, phase gates, tests and acceptance evidence.
 - [`adrs/`](adrs/) — ten proposed architecture decision records.
+- [`docs/assurance/`](../../assurance/README.md) — software-assurance baseline, Rust standard, financial-market controls, terminology and verification records.
 
 ## 9. Evidence and scope discipline
 

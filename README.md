@@ -22,6 +22,11 @@ operations, and proposed ADRs. The
 active phased implementation plan and gate register for applying that charter.
 Neither document is a claim that live order submission is enabled.
 
+The [software-assurance baseline](docs/assurance/README.md) defines the controlled
+engineering lifecycle, Rust correctness rules, financial-market controls,
+terminology and verification policy that apply to all subsequent work. It is a
+design baseline, not a certification or production-readiness claim.
+
 ## What it does
 
 - Discovers live, non-MVE Kalshi markets and subscribes to every selected ticker.

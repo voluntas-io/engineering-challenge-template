@@ -1,10 +1,18 @@
 # Polymarket Production Programme
 
-**Status:** Active engineering plan; this document sets gates, not a claim of production readiness.  
-**Baseline:** `kj111422/engineering-challenge-template` `main` at `9ab6cd5a584fea58c0086efa50d55c796e9aac4` (2026-10-26).  
-**Primary objective:** Turn the challenge collector into a reliable Polymarket market-data, research, risk, and controlled-execution platform.  
+**Status:** Active engineering plan; this document sets gates, not a claim of production readiness.
+
+**Historical baseline:** `kj111422/engineering-challenge-template` `main` at `9ab6cd5a584fea58c0086efa50d55c796e9aac4` (2026-10-26). Test counts and run links below remain tied to that historical commit.
+
+**Current verified baseline:** `main` at `3da31e84cb883c78c2104c839d55a718c3891088` (2026-11-02), with the assurance baseline integrated on 2026-11-05.
+
+**Primary objective:** Turn the challenge collector into a reliable Polymarket market-data, research, risk, and controlled-execution platform.
+
 **Execution policy:** Public-data collection and replay are permitted by default. Private credentials and live order transmission remain disabled until the relevant gates pass.
+
 **Engineering charter:** [`docs/design/event-market-platform-v1/`](design/event-market-platform-v1/README.md) — target architecture, domain contracts, unified input log, deterministic replay and state-machine contracts, security boundaries, and proposed ADRs. This roadmap is the phased implementation plan and gate register that applies the charter.
+
+**Assurance baseline:** [`docs/assurance/`](assurance/README.md) — software-assurance process, Rust engineering standard, financial-market controls, terminology, audit tooling and verification records.
 
 ## 1. Current baseline: what exists and what does not
 

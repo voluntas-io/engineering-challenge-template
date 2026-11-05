@@ -1,0 +1,2714 @@
+{
+  "schema_version": 1,
+  "repository": "kj111422/engineering-challenge-template",
+  "head": "3da31e84cb883c78c2104c839d55a718c3891088",
+  "tree": "52aecd149b131e98baa9ee3cbbfaa08004227ec4",
+  "scope": "tracked working-tree text plus all reachable commit subjects and bodies",
+  "stats": {
+    "tracked_paths": 133,
+    "scanned_text_files": 133,
+    "binary_files": [],
+    "unreadable_files": [],
+    "excluded_files": []
+  },
+  "summary": {
+    "total_findings": 293,
+    "by_category": {
+      "filler": 11,
+      "informal_or_ambiguous_verb": 8,
+      "promotional_or_banned_candidate": 5,
+      "tautology": 1,
+      "unsupported_absolute_or_guarantee": 150,
+      "vague_quantifier_or_scope": 118
+    },
+    "by_severity": {
+      "error": 1,
+      "review": 292
+    }
+  },
+  "findings": [
+    {
+      "source": "README.md",
+      "line": 173,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "page's  as . Offset-style pagination is never used,"
+    },
+    {
+      "source": "README.md",
+      "line": 282,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "supplied aligned-chunk format. Messages never cross a chunk boundary; unused"
+    },
+    {
+      "source": "README.md",
+      "line": 299,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "several outcome tokens, and the cap is applied between records so a condition's"
+    },
+    {
+      "source": "README.md",
+      "line": 300,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "outcome set is never split. Discovery telemetry reports selected records and"
+    },
+    {
+      "source": "README.md",
+      "line": 338,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "after a later-timestamped frame from another source, so cross-symbol receive"
+    },
+    {
+      "source": "README.md",
+      "line": 340,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- Per symbol, the first full snapshot anchors the book; later deltas apply to"
+    },
+    {
+      "source": "README.md",
+      "line": 345,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "snapshot therefore carries the status-processing time, which never precedes"
+    },
+    {
+      "source": "README.md",
+      "line": 350,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "are never serialized. Every serialized timestamp \u2014 event receive times and"
+    },
+    {
+      "source": "README.md",
+      "line": 401,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "time. Rotation happens only between messages, so a message is never split."
+    },
+    {
+      "source": "README.md",
+      "line": 424,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "partial page set, repeated cursor, or failed validation never replaces it."
+    },
+    {
+      "source": "README.md",
+      "line": 430,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "|  | Always discover; never read a checkpoint. |"
+    },
+    {
+      "source": "README.md",
+      "line": 430,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "|  | Always discover; never read a checkpoint. |"
+    },
+    {
+      "source": "README.md",
+      "line": 479,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "(the schema allows template ids this collector never emits)"
+    },
+    {
+      "source": "README.md",
+      "line": 485,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "later non-empty snapshot can expose a gap."
+    },
+    {
+      "source": "README.md",
+      "line": 506,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "6. negative control: a missing update is detected when a later non-empty"
+    },
+    {
+      "source": "README.md",
+      "line": 550,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "parallel connections never collide. A fixed source port cannot be combined"
+    },
+    {
+      "source": "README.md",
+      "line": 552,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "-  opens that many full TCP + TLS + websocket handshakes"
+    },
+    {
+      "source": "README.md",
+      "line": 557,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "An authentication rejection (HTTP 401/403) is never raced away: it fails"
+    },
+    {
+      "source": "README.md",
+      "line": 576,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "usually",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "clock-independent number: two sockets on this host usually saw the same update"
+    },
+    {
+      "source": "README.md",
+      "line": 622,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "good",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "|  | none | Last-known-good discovery checkpoint |"
+    },
+    {
+      "source": "README.md",
+      "line": 751,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "reading the whole file into memory, and never considers a chunk larger than"
+    },
+    {
+      "source": "config.example.toml",
+      "line": 44,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "good",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "Last-known-good discovery checkpoint. Modes: off, warm, require, stale."
+    },
+    {
+      "source": "config.example.toml",
+      "line": 55,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "default because order-book frames are small and latency-sensitive. Race"
+    },
+    {
+      "source": "config.example.toml",
+      "line": 56,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "several full handshakes with connect_race > 1 and keep the first success."
+    },
+    {
+      "source": "config.example.toml",
+      "line": 58,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "ordinal, so parallel connections never collide; a fixed port cannot be"
+    },
+    {
+      "source": "config.example.toml",
+      "line": 83,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "Stop before the output filesystem falls below this many free bytes. The"
+    },
+    {
+      "source": "deploy/deployment-notes.md",
+      "line": 122,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Never commit secrets to version control. Use   or external secret manager."
+    },
+    {
+      "source": "deploy/deployment-notes.md",
+      "line": 236,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Ensure",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "2. Ensure  matches the original run (especially  and )."
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 5,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "**Historical disposition:** The archived snapshot had module/API integration blockers. The audit's 2026-10-27 note records that , , and  were later integrated. The current  at  has passing [Rust CI] and [architecture CI]. The diagrams below describe the earlier ZIP snapshot and must not be used as the current runtime topology. See [] for the active production target and staged gates."
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 68,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "simply",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "The active source graph is not internally consistent in this archive.  exports neither , , nor . The metrics module has already been changed to depend on , while the coordinator still uses the old  and  call shapes; the definitions in  require a readiness policy and a fourth  argument. If the dormant files were simply added to , further compile errors would remain:  reads collector limits absent from , and  references , for which no definition exists in the supplied  tree. This is an integration"
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 194,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "Later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "**Current operational caveat:** the initial full discovery is synchronous from the caller's perspective and completes before workers start. Later discovery is off the main event loop, but an accepted result still causes metadata-sidecar serialization/write from the coordinator path. The configured discovery interval is a polling cadence, not a guarantee that a full REST sweep completes within that cadence."
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 194,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantee",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "**Current operational caveat:** the initial full discovery is synchronous from the caller's perspective and completes before workers start. Later discovery is off the main event loop, but an accepted result still causes metadata-sidecar serialization/write from the coordinator path. The configured discovery interval is a polling cadence, not a guarantee that a full REST sweep completes within that cadence."
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 221,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "provides an offline SBE view.  checks capture self-consistency by applying deltas and comparing reconstructed books with subsequent snapshots. It is not an oracle for every missed live update: a missed event is detectable only when later observations expose the mismatch."
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 296,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "The runtime configuration is validated by ; the important sizing relationship is , with both  and  enforced when automatic sharding is selected. Replica count multiplies source sockets: . These are admission bounds, not evidence that the remote exchange accepts that many concurrent sockets."
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 305,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Clockless recovery requires an acknowledged receive fence and a fresh exchange snapshot | : , , clockless gate in ; : receive-fence stamping,  acknowledgement | , , ,  | Deltas never restore ; a shadow snapshot is book evidence only. |"
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 309,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Every application payload read is journaled exactly once at the ingress boundary | : , ; : ,  | E2E , E2E , ,  | The receive fence advances exactly once per payload read, before any decode or protocol decision; ignored and rejected payloads keep their exact bytes. Transport idle events advance neither the fence nor the journal. A frame written into a socket at reconnect teardown is a transport loss, not a journal accounting failure. |"
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 309,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Every application payload read is journaled exactly once at the ingress boundary | : , ; : ,  | E2E , E2E , ,  | The receive fence advances exactly once per payload read, before any decode or protocol decision; ignored and rejected payloads keep their exact bytes. Transport idle events advance neither the fence nor the journal. A frame written into a socket at reconnect teardown is a transport loss, not a journal accounting failure. |"
+    },
+    {
+      "source": "docs/architecture.md",
+      "line": 310,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "|  detects a missed update when a later snapshot exposes divergence | :  | E2E  | Self-consistency check only; it cannot detect every missing or overwritten event. |"
+    },
+    {
+      "source": "docs/architecture/integration-audit-2026-10-26.md",
+      "line": 8,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "production-ready",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "The ZIP contains no  directory. Findings are tied to this exact source snapshot, not to a remote branch tip or a commit. **Disposition (at time of audit): integration blocked; do not describe the archive as a verified build or a production-ready runtime.** This review environment has Python 3 and Node.js, but no  or ; no Rust build/test result is claimed."
+    },
+    {
+      "source": "docs/architecture/integration-audit-2026-10-26.md",
+      "line": 36,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "Merely",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "is not reachable from a crate root. It imports  and ; the  module is not declared, and no  definition exists under . Merely adding  is not a complete integration fix."
+    },
+    {
+      "source": "docs/architecture/integration-audit-2026-10-26.md",
+      "line": 68,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "appropriate",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "1. **Reconcile crate roots and APIs.** Decide whether to complete or remove the three draft modules. If completing them, expose the modules in the appropriate crate root and resolve the  constructor/update API mismatch first."
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 27,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| W4 Saturation fails loudly | Bounded queue with a send timeout; accepted messages always drain before join |  and the new test below |"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 47,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "is handed over. A timed-out send never acquires a permit, so it provably"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 66,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| V4 Undecodable content fails | Unknown template ids and invalid deltas are errors, never skipped | ;  fails validity |"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 89,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- Invariant: verify detects a missing update exactly when a later non-empty"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 92,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "later non-empty snapshot for that symbol, and a missing update whose level"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 93,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "is later overwritten to the same absolute value, both leave a self-"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 180,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "update is detected whenever a later non-empty snapshot exists for the"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 243,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Malformed input never mutates book state | , codec tests,  |"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 247,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| Missing updates are exposed by a later snapshot | E2E negative control |"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 248,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| Missing updates without a later snapshot are unverifiable in-band | V-2 proof above; documented limit |"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 276,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "for the probe threshold (120 s by default) \u2014 common in a large,"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 316,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "NOW + 300, then asserts the snapshot carries NOW + 300 (never the older"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 336,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "(localhost server accepts TCP, never upgrades) and"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 345,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "run; automatic sharding never silently exceeds ."
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 365,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "durations, retries, and timeouts, and is never serialized."
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 385,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "the same synchronous step; no await separates the two, so the buffer never"
+    },
+    {
+      "source": "docs/correctness-audit-2026-10-26.md",
+      "line": 411,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "never ok); the readiness policy was already recorded."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 55,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "simply",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "**Correction to the supplied initial critique:** the raw journal already preserves source/replica identity and records frames before the core selects an active source. Redundant-source arrival information is not simply collapsed at raw write time. The canonical SBE output is an active-source projection; the raw tier retains per-source observations. The next task is to exploit that retained information, not build a second raw tier."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 68,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| Continuity |  exists and the core has extensive transition logic and tests |  directly assigns a state. The transition policy is not an exhaustive pure transition function/table.  is a large responsibility cluster. |"
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 101,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "5. **Raw preservation.** Decoding and normalization never destroy the original venue payload or native quote representation."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 106,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "production ready",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "10. **No unsupported claims.** A capability is not \u201cproduction ready\u201d because a mock test passes."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 155,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| Deterministic core | Books, source continuity, instrument lifecycle and later portfolio/order/risk reducers | I/O, wall clock, random numbers, network calls |"
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 166,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "merely",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "Start with a modular monolith and strict module/port boundaries. Do not introduce Kafka, Kubernetes, ten microservices or a distributed transaction system merely to look like a large firm. The first boundary extraction should be process-level only where it materially improves custody, failure isolation or independent risk control."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 166,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "Start with a modular monolith and strict module/port boundaries. Do not introduce Kafka, Kubernetes, ten microservices or a distributed transaction system merely to look like a large firm. The first boundary extraction should be process-level only where it materially improves custody, failure isolation or independent risk control."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 175,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "A platform deployment later adds tenant isolation, per-tenant keys, quotas, audit, API contracts and service-level telemetry. Those are not reasons to distribute the deterministic core prematurely."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/README.md",
+      "line": 243,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "6. Outputs are committed to projections; effects are dispatched by edge workers and their results are appended as later core inputs."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0001-unified-event-log-and-replay.md",
+      "line": 9,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "some",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "The current raw journal retains WebSocket application payloads and their source provenance, but does not replay them through the decoder and core. The current JSONL replay drives  with normalized records, but it is a separate format and lacks some live control/acknowledgement inputs. The live coordinator also consumes discovery snapshots, source statuses, recovery acknowledgements, timer ticks and shutdown boundaries. Raw frames alone therefore cannot reproduce every core transition."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0001-unified-event-log-and-replay.md",
+      "line": 21,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Every canonical venue event references one or more raw records. The core-input sequencer assigns one monotonically increasing  at the reducer boundary. The reducer consumes that offset order, never timestamp order."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0001-unified-event-log-and-replay.md",
+      "line": 53,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- Hash chains and signed manifest are a later integrity layer; SHA checksums alone are not authentication."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0002-economic-claim-and-venue-listing.md",
+      "line": 29,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantees",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- **Normalize by title/slug/question similarity:** rejected; no semantic or resolution guarantees."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0003-native-prices-fees-and-collateral.md",
+      "line": 21,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantee",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Record actual fee charged on each fill. A fee quote is an estimate with a named formula, not a guarantee."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0004-time-and-ordering-contract.md",
+      "line": 19,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Also record receive wall UTC time, monotonic time, process boot ID and clock-quality observation reference. Never compare monotonic time across boot IDs. Do not sort or rewrite records to create a globally monotone timestamp series."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0004-time-and-ordering-contract.md",
+      "line": 38,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Tests prove receive sequence increments exactly once per application payload."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0005-venue-adapter-contract.md",
+      "line": 26,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantees",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Execution capabilities are separate traits and are not required by a public-data adapter. A data-only venue adapter cannot access OMS or signer methods. Capabilities explicitly declare sequence/clock guarantees, subscription semantics, snapshot behavior, price grid, fee source, collateral, idempotency, client-order lookup and cancel guarantees."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0005-venue-adapter-contract.md",
+      "line": 26,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantees",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Execution capabilities are separate traits and are not required by a public-data adapter. A data-only venue adapter cannot access OMS or signer methods. Capabilities explicitly declare sequence/clock guarantees, subscription semantics, snapshot behavior, price grid, fee source, collateral, idempotency, client-order lookup and cancel guarantees."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0005-venue-adapter-contract.md",
+      "line": 33,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- **One adapter interface that requires every venue capability:** rejected; many venues do not support the same sequence, snapshot or order functionality."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0006-pure-reducers-and-continuity.md",
+      "line": 9,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "is synchronous and shared by live and normalized replay, which is a strong foundation. However, the large state module contains multiple responsibilities, and continuity state can be assigned directly via a setter. Tests cover many paths, but the transition contract is not yet a standalone exhaustive model."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0006-pure-reducers-and-continuity.md",
+      "line": 9,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "is synchronous and shared by live and normalized replay, which is a strong foundation. However, the large state module contains multiple responsibilities, and continuity state can be assigned directly via a setter. Tests cover many paths, but the transition contract is not yet a standalone exhaustive model."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0006-pure-reducers-and-continuity.md",
+      "line": 37,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "Small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- Small finite state properties are model-checked when a clear proof obligation exists."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0009-tenant-and-eligibility-policy.md",
+      "line": 20,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- **Infer eligibility from IP or network routing:** rejected; it is not a reliable legal authorization and must never be used to route around restrictions."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/adrs/ADR-0010-storage-format-and-compatibility.md",
+      "line": 22,
+      "category": "promotional_or_banned_candidate",
+      "severity": "review",
+      "phrase": "forever",
+      "rationale": "Promotional or absolute wording; replace with measured evidence where appropriate.",
+      "context": "- **Keep PMJ forever as canonical:** rejected; a venue-neutral platform should not expose venue branding in generic infrastructure."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/data-model.md",
+      "line": 161,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Never use  for a price, quantity, fee, balance, fill or ledger amount."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/data-model.md",
+      "line": 253,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "actually",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "The adapter supplies the current fee parameters and the fee engine evaluates a versioned formula. The raw metadata and formula source are archived. An unknown formula is allowed as an explicit data state but blocks fee-aware performance claims and live risk approvals. Do not treat maker and taker fees as one field. Fees may be evaluated at match time, not order creation; store the fee actually charged on each fill."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/data-model.md",
+      "line": 325,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "merely",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "Do **not** assume that outcome prices sum to one merely because labels are mutually exclusive. A valid probability-style sum constraint requires both an exhaustive and mutually exclusive outcome set under compatible payoff, collateral and settlement conventions. Market bid/ask prices still differ because of spread, fees, liquidity and venue basis risk."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/data-model.md",
+      "line": 359,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "supports cross-process display and time correlation.  supports local elapsed-time and latency measurement.  prevents accidental comparison of monotonic values across process restarts.  records clock source, offset estimate and uncertainty at the time of capture. Exchange time is a separate optional field, never a replacement for receive time."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/data-model.md",
+      "line": 528,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Never turn \u201cno detected gap\u201d into \u201cthe venue published no missing event.\u201d The certificate states what is known and the guarantees used."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/data-model.md",
+      "line": 528,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantees",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Never turn \u201cno detected gap\u201d into \u201cthe venue published no missing event.\u201d The certificate states what is known and the guarantees used."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/data-model.md",
+      "line": 537,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Audit access and mutations; customer data is never visible across tenant IDs by default."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/input-log-and-replay.md",
+      "line": 73,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Raw payload bytes are never normalized in place. A text frame's exact UTF-8 byte sequence is retained."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/input-log-and-replay.md",
+      "line": 74,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- REST discovery bodies are raw records too. Persist the raw response body, sanitized request parameters, relevant response headers, endpoint/contract version, pagination cursor, ETag/request ID when available, receive times and content hash. Never store credentials, authorization headers or secret query material."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/input-log-and-replay.md",
+      "line": 75,
+      "category": "promotional_or_banned_candidate",
+      "severity": "review",
+      "phrase": "perfectly",
+      "rationale": "Promotional or absolute wording; replace with measured evidence where appropriate.",
+      "context": "-  identifies a separately logged clock-quality observation; it is not a claim that the machine clock was synchronized perfectly."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/input-log-and-replay.md",
+      "line": 154,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "If an effect result changes core state, append the corresponding  event before applying that transition. For example,  is an effect;  is a later core input. Replay consumes the acknowledgement at the same core-input offset. It does not issue a real WebSocket request."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/input-log-and-replay.md",
+      "line": 166,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- The reducer consumes  order. Never sort inputs by event timestamp or wall timestamp."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/input-log-and-replay.md",
+      "line": 168,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Monotonic time is process/boot scoped. Never compare monotonic timestamps from unrelated boot IDs."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/input-log-and-replay.md",
+      "line": 195,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "5. On restart, rebuild from the last verified checkpoint plus later log offsets. If the process dies after input append but before output append, replay the input and regenerate outputs."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/repo-audit.md",
+      "line": 17,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- [] \u2014 large synchronous core, per-source books, recovery requests, continuity incident state and direct continuity setter."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/repo-audit.md",
+      "line": 27,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "just",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "3. **The critical missing replay input is not just discovery/status/tick.** Live coordinator code consumes  and calls . There is no corresponding normalized replay record. Replay also initializes event metadata with zero connection epoch and receive sequence, while live source frames carry actual fences."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/repo-audit.md",
+      "line": 30,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "6. **Continuity is extensive but not enforced by a standalone transition function.**  directly assigns a state; continuity decisions are distributed through the large state module. The proposal is to extract a pure transition table while preserving current behavior through replay equality tests."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/roadmap.md",
+      "line": 108,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "slow",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- 24-hour soak with a predeclared fault schedule: network loss, reconnect storms, slow disk, full disk, process termination, clock step, partial segment, permission failure and venue protocol unknown event."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/roadmap.md",
+      "line": 139,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "**Acceptance:** fault-injected timeout after submit never duplicates exposure; reservations are atomic; every order has a risk decision; ledger balances per asset; reconciliation mismatch blocks risk; paper mode has no live endpoint/key."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/security-and-operations.md",
+      "line": 26,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- It records request hash, key identifier/version, policy decision, signature result and correlation IDs. It never logs the secret."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/security-and-operations.md",
+      "line": 92,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Retention rules that never delete an unfinalized, referenced or legally held segment."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/security-and-operations.md",
+      "line": 115,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Never carry test counts from one commit to another. A static inventory count is not a passing test count."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/state-machines.md",
+      "line": 61,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Terminal | Any late book event | Terminal | Ignore and count late event; never resurrect |"
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/state-machines.md",
+      "line": 77,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "5. Property-test that a delta never mutates a book outside ."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/state-machines.md",
+      "line": 79,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "7. Model-check the small finite state machine after property tests stabilize. Kani or TLA+ are candidates; select one by proof obligation, not fashion."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/state-machines.md",
+      "line": 130,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| SubmitPending | Timeout / connection loss | Unknown | Never retry blindly |"
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/state-machines.md",
+      "line": 180,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "3. Reordering two inputs with distinct offsets changes only according to the actual reducer ordering; timestamps never silently reorder them."
+    },
+    {
+      "source": "docs/design/event-market-platform-v1/state-machines.md",
+      "line": 181,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "4. Unknown/invalid data never promotes a listing/book/order/account to a safe state."
+    },
+    {
+      "source": "docs/final-verification-2026-10-25.md",
+      "line": 8,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "recovery, timestamp, and sharding behavior changed on later development"
+    },
+    {
+      "source": "docs/final-verification-2026-10-25.md",
+      "line": 41,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "|  | A market is removed and a new one added | The retired symbol ends with an empty retirement snapshot and no later delta; the new symbol starts with a snapshot and its own deltas;  accepts the retirement boundary. |"
+    },
+    {
+      "source": "docs/final-verification-2026-10-25.md",
+      "line": 72,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "after a later-timestamped frame from another source, so cross-symbol receive"
+    },
+    {
+      "source": "docs/final-verification-2026-10-25.md",
+      "line": 74,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- Per symbol, the first full snapshot anchors the book; later deltas apply to"
+    },
+    {
+      "source": "docs/final-verification-2026-10-25.md",
+      "line": 80,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "few",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "different worker channels, that generated timestamp can be a few microseconds"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 11,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "The  command measures four different things and never invents values:"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 11,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "things",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "The  command measures four different things and never invents values:"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 35,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "each reported delta is the later arrival minus the earliest arrival of that"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 36,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "event. This comparison is **clock-independent**: it never subtracts an"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 104,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "usually",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "1. **Two independent connections usually see the same update within tens of"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 109,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "slow",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "occasional slow paths \u2014 exactly the distribution Extension 1's failover"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 119,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "slow",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "first success discards the slow ones."
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 134,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "which small order-book frames wait for coalescing, but the runs did not"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 141,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "fraction of a second later \u2014 waited 271\u2013617 ms for its first frame on every"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 150,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "applies the same bounded three-attempt retry, and never retries a fatal"
+    },
+    {
+      "source": "docs/latency.md",
+      "line": 177,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "stdout. Run each configuration several times if you need a distribution across"
+    },
+    {
+      "source": "docs/metric-runbook.md",
+      "line": 70,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "slow",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "|  | Gauge | Duration of last discovery round | < 10,000 typically | > 30,000 (slow discovery) |"
+    },
+    {
+      "source": "docs/metric-runbook.md",
+      "line": 84,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "slow",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "|  |  | EWMA of receive-to-process latency | > 100ms (slow path) |"
+    },
+    {
+      "source": "docs/metric-runbook.md",
+      "line": 96,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- **Always returns 200 OK** if the process can answer HTTP."
+    },
+    {
+      "source": "docs/metric-runbook.md",
+      "line": 134,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Returns **200 OK** always (liveness)."
+    },
+    {
+      "source": "docs/metric-runbook.md",
+      "line": 135,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "some",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- :  (no sources yet),  (all connected),  (some down)."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 78,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "clearly",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "- Mark the old  content as a historical audit of the 2026-10-26 ZIP, not the active runtime architecture. Publish a current Polymarket target and clearly label implemented versus planned nodes."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 80,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Each test/benchmark report pins the exact commit and configuration. Never carry test counts forward automatically after code changes."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 89,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Keep CTF token IDs and Protocol V2 position IDs as distinct instrument-identity cases. Never infer identity from a mutable slug or question."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 90,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Record and validate market metadata required for pricing and order validation: active/closed/accepting-orders status, market version and asset identifier, tick size, minimum order size, and applicable fee information when available. Never promote missing/unknown fields to safe defaults without a named policy."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 105,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Define disk-full, permission, fsync, partial-write, and shutdown-timeout behavior. Fail loudly; never claim successful durability before the configured sync policy completes."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 129,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantee",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "**Exit gate:** every strategy must beat a declared baseline after fees and conservative fill assumptions on a held-out period, remain within risk limits under stress scenarios, and include a reproducible research report. This is not a guarantee of future performance."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 137,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "- Implement explicit order states, including unknown/ack-pending, live, partially matched, cancelled, rejected, and terminal states. Treat timeout after submit as an ambiguous outcome: query/reconcile before retrying; never blindly duplicate an order."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 159,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- Start with one strategy and a small, predefined market set; enforce a small hard capital cap and per-market exposure cap."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 159,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- Start with one strategy and a small, predefined market set; enforce a small hard capital cap and per-market exposure cap."
+    },
+    {
+      "source": "docs/production-roadmap-polymarket.md",
+      "line": 176,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "Each step should be its own small pull request, with one behavioral objective, regression tests, a commit-pinned report, and passing CI. Do not combine feed changes, order submission, and strategy logic in one PR."
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 56,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "without finalization leaves the  file in place; it is never renamed"
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 68,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "|  | Per-source frame counter, reset to zero for each new epoch and advanced exactly once for every payload read at the ingress boundary \u2014 before any decode or protocol decision \u2014 including ignored and rejected payloads. |"
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 79,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "parsing or protocol decisions, exactly once per payload read. This includes:"
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 98,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "actually",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "failure; the journal accounts for every payload the collector actually read."
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 182,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "writer observes it before every command, later records are rejected, and"
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 186,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": ", records the error, stops the writer, and rejects later records."
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 192,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "latched a failure never verifies as complete."
+    },
+    {
+      "source": "docs/raw-frame-journal.md",
+      "line": 198,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "failed, and never claims finalization. A writer still blocked inside an"
+    },
+    {
+      "source": "docs/requirement-test-matrix.md",
+      "line": 42,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| A source switch is anchored by a full snapshot before resumed deltas | E2E ;  | The snapshot equals the shadow's truth at loss and later deltas apply to it. It does not prove a live venue's shadow is complete. |"
+    },
+    {
+      "source": "docs/requirement-test-matrix.md",
+      "line": 46,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| A missed update is detectable when a later snapshot exposes it | E2E  |  exits invalid when a later non-empty snapshot disagrees with the reconstructed book;  is not a completeness oracle by itself. |"
+    },
+    {
+      "source": "docs/requirement-test-matrix.md",
+      "line": 46,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| A missed update is detectable when a later snapshot exposes it | E2E  |  exits invalid when a later non-empty snapshot disagrees with the reconstructed book;  is not a completeness oracle by itself. |"
+    },
+    {
+      "source": "docs/requirement-test-matrix.md",
+      "line": 47,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Timestamps are actual receive times and are not clamped | ; ; E2E  | Event receive timestamps are preserved exactly. Generated snapshots are stamped with the wall-clock generation time; a failover snapshot never precedes the replacement book's last receive time and is not rewritten. |"
+    },
+    {
+      "source": "docs/requirement-test-matrix.md",
+      "line": 49,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "|  handles retirement/empty books without false mismatches |  | An empty snapshot is counted as a boundary, not compared level-by-level. It cannot prove a suppressed update that emptied a book was observed; only a later non-empty snapshot can. |"
+    },
+    {
+      "source": "docs/requirement-test-matrix.md",
+      "line": 54,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Every application payload read is journaled exactly once | E2E ; E2E ;  | Sent == journaled with contiguous per-source sequences for a stable connection; malformed/binary rejections and ignored outcomes keep exact bytes across reconnect generations. Transport-level idle events are out of scope; a frame written during socket teardown is a transport loss, not journal accounting. |"
+    },
+    {
+      "source": "docs/verification-2026-11-01-journal-hardening.md",
+      "line": 56,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| H1 | Queue saturation only marked the in-memory status; a subsequent normal  could finalize the run as complete, hiding a rejected frame | Producer admission closes before finalization; a latched failure is observed by the writer before every command;  refuses a failed run;  never overrides ; the source worker turns a rejected record into a fatal stop. Evidence: , ,  |"
+    },
+    {
+      "source": "docs/verification-2026-11-01-journal-hardening.md",
+      "line": 57,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| H2 | / used a blocking channel send for the control command, so a saturated queue with a blocked writer could exceed the configured timeout | One absolute deadline at method entry bounds producer quiescence, command delivery (), the response wait, and writer-thread observation. Deadline expiry returns an error and never claims finalization. Evidence: , , ,  |"
+    },
+    {
+      "source": "docs/verification-2026-11-01-journal-hardening.md",
+      "line": 58,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| H3 |  carried no raw payload and did not advance ; several Kalshi branches returned transport-style idle frames after reading application payloads | Protocol is a struct variant that preserves the exact payload and receive timestamp; the worker journals every read payload through one ingress path () that advances the fence exactly once before any decode or protocol decision; Kalshi ignored outcomes are explicit  records with untouched bytes. Evidence: E2E , , ,  |"
+    },
+    {
+      "source": "docs/verification-2026-11-01-journal-hardening.md",
+      "line": 58,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| H3 |  carried no raw payload and did not advance ; several Kalshi branches returned transport-style idle frames after reading application payloads | Protocol is a struct variant that preserves the exact payload and receive timestamp; the worker journals every read payload through one ingress path () that advances the fence exactly once before any decode or protocol decision; Kalshi ignored outcomes are explicit  records with untouched bytes. Evidence: E2E , , ,  |"
+    },
+    {
+      "source": "docs/verification-2026-11-01-journal-hardening.md",
+      "line": 82,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantees",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "guarantees \u2014 exact bytes, outcomes, and contiguous per-generation sequences \u2014"
+    },
+    {
+      "source": "docs/verification-2026-11-01-journal-hardening.md",
+      "line": 95,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "| Finalize accepted but never answered stays incomplete |  |"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 18,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "fast",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "may be fast-forwarded to the promotion tip. The reviewed range is a"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 32,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "fast",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "Promotion is a fast-forward only. It does not create a merge commit, rewrite"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 91,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "Small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "| Remaining source files | Small API/comment adjustments required by the above |"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 111,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "Several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "- **Intermediate CI was not uniformly green.** Several work-in-progress"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 112,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "commits failed CI and were fixed by later commits. Promotion rests on the"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 134,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "their fixes are contained in later commits and are not used as promotion"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 167,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "fast",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "The promotion is a fast-forward, performed only after this review:"
+    },
+    {
+      "source": "docs/verification-2026-11-02-phase0-promotion.md",
+      "line": 179,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "fast",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "rebase, reset, force-push, or history rewrite is used. If the fast-forward"
+    },
+    {
+      "source": "measurements/README.md",
+      "line": 11,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "64 KiB chunks; later captures use the 64 MiB default."
+    },
+    {
+      "source": "src/capacity.rs",
+      "line": 143,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ this never derives a new shard count: workers and sockets already exist."
+    },
+    {
+      "source": "src/capacity.rs",
+      "line": 170,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "usually",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ supplies one symbol per market and usually no separate market id."
+    },
+    {
+      "source": "src/catalog.rs",
+      "line": 1,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "good",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "! Persisted last-known-good discovery catalog."
+    },
+    {
+      "source": "src/cli.rs",
+      "line": 53,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Race this many simultaneous websocket handshakes and keep the first."
+    },
+    {
+      "source": "src/cli.rs",
+      "line": 71,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate the capture after this many bytes. Zero disables size rotation."
+    },
+    {
+      "source": "src/cli.rs",
+      "line": 75,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate the capture after this many seconds. Zero disables time rotation."
+    },
+    {
+      "source": "src/cli.rs",
+      "line": 79,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Stop before free space on the output filesystem drops below this many"
+    },
+    {
+      "source": "src/cli.rs",
+      "line": 89,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "good",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "/ Last-known-good catalog checkpoint."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 238,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "appropriate",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ apply control messages to the appropriate source workers."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 391,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ was sent but not answered therefore never counts as anchored. Stale"
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 489,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ the new symbol. Downstream consumers therefore never see deltas for a"
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 772,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "current epoch. Invalidate it so a later failover requires a"
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 810,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "book win a later failover comparison."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 829,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "never reach the stale-probe threshold."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 921,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "with a snapshot. Never apply it to the shadow book."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 1151,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ snapshots carry it, so their local timestamp never precedes the receive"
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 1522,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "exchange clock. Clockless venues always wait for a fresh snapshot."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 1550,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Count a discontinuity incident exactly once, when it is first opened."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 1575,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "published state. Promotion always requires a fresh exchange snapshot"
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 1702,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ can never inject wall-clock time into deterministic (replayed) output; it"
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 2050,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "A later delta applies to the state produced by the snapshot plus the"
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 2796,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "symbol's incident or consume the token needed for a later failover."
+    },
+    {
+      "source": "src/collector/state.rs",
+      "line": 2877,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Terminal: the retired identity is never reopened."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 99,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ initial snapshot subscription is always sent as one frame."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 162,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ One Polymarket Gamma record can contribute several outcome tokens; the"
+    },
+    {
+      "source": "src/config.rs",
+      "line": 163,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ cap is applied between records, never inside one record's outcome set."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 180,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "good",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "/ Last-known-good catalog checkpoint. `None` disables persistence."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 200,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Discover before starting workers; never read a checkpoint."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 273,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate after this many bytes (0 disables size rotation)."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 275,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate after this many seconds (0 disables time rotation)."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 277,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Stop before free space on the output filesystem drops below this many"
+    },
+    {
+      "source": "src/config.rs",
+      "line": 316,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ order-book frames are small and latency-sensitive, and a single connection"
+    },
+    {
+      "source": "src/config.rs",
+      "line": 328,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ connections never collide. Cannot be combined with `connect_race > 1`,"
+    },
+    {
+      "source": "src/config.rs",
+      "line": 392,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate after this many record bytes (0 disables size rotation)."
+    },
+    {
+      "source": "src/config.rs",
+      "line": 394,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate after this many seconds (0 disables time rotation)."
+    },
+    {
+      "source": "src/coordinator.rs",
+      "line": 61,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ of the capture-affecting configuration. Credentials never enter either"
+    },
+    {
+      "source": "src/coordinator.rs",
+      "line": 637,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "full queue must never delay process shutdown."
+    },
+    {
+      "source": "src/exchange/kalshi/auth.rs",
+      "line": 30,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ never logged."
+    },
+    {
+      "source": "src/exchange/kalshi/discovery.rs",
+      "line": 6,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "! websocket subscriptions so a transient REST failure never tears down"
+    },
+    {
+      "source": "src/exchange/kalshi/discovery.rs",
+      "line": 28,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "bad",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "/ single bad entry cannot abort reconciliation for every valid market. If"
+    },
+    {
+      "source": "src/exchange/kalshi/session.rs",
+      "line": 39,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ sequence number. Prevents an old ack from masking an arbitrarily large gap."
+    },
+    {
+      "source": "src/exchange/mod.rs",
+      "line": 19,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ where one Gamma record expands into several outcome tokens."
+    },
+    {
+      "source": "src/exchange/polymarket/codec.rs",
+      "line": 62,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "sometimes",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Decode one market-channel frame. Polymarket sometimes emits a JSON array"
+    },
+    {
+      "source": "src/exchange/polymarket/codec.rs",
+      "line": 299,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "Some",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ - a present, well-formed value \u2192 `Ok(Some(micros))`;"
+    },
+    {
+      "source": "src/exchange/polymarket/codec.rs",
+      "line": 301,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/   timestamp must surface as a decode error, never silently become the"
+    },
+    {
+      "source": "src/exchange/polymarket/codec.rs",
+      "line": 438,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "so a partially applied batch can never reach the core."
+    },
+    {
+      "source": "src/exchange/polymarket/codec.rs",
+      "line": 583,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Present but invalid timestamps are decode errors, never `None`."
+    },
+    {
+      "source": "src/exchange/polymarket/discovery.rs",
+      "line": 42,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "metadata and must never influence the output symbol."
+    },
+    {
+      "source": "src/exchange/polymarket/discovery.rs",
+      "line": 192,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "are mutable metadata; a slug change must never split one"
+    },
+    {
+      "source": "src/exchange/polymarket/discovery.rs",
+      "line": 244,
+      "category": "informal_or_ambiguous_verb",
+      "severity": "review",
+      "phrase": "bad",
+      "rationale": "Replace with a named operation, state, object or acceptance criterion.",
+      "context": "/ single bad entry cannot abort reconciliation for every valid market. If"
+    },
+    {
+      "source": "src/exchange/polymarket/discovery.rs",
+      "line": 282,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "never applied inside one market's outcome list."
+    },
+    {
+      "source": "src/exchange/polymarket/discovery.rs",
+      "line": 312,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "separately because one selected market can contribute several."
+    },
+    {
+      "source": "src/exchange/polymarket/discovery.rs",
+      "line": 739,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "The cap stops between records, never inside an outcome list."
+    },
+    {
+      "source": "src/exchange/polymarket/session.rs",
+      "line": 99,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "dump. Sending several type=market frames on one socket makes the"
+    },
+    {
+      "source": "src/journal.rs",
+      "line": 178,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate after this many record bytes. Zero disables size rotation."
+    },
+    {
+      "source": "src/journal.rs",
+      "line": 180,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "many",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Rotate after this many seconds. Zero disables time rotation."
+    },
+    {
+      "source": "src/journal.rs",
+      "line": 2310,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "never report a complete journal after a rejected frame."
+    },
+    {
+      "source": "src/journal.rs",
+      "line": 2328,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "The third payload was never accepted, so it must not appear anywhere."
+    },
+    {
+      "source": "src/journal.rs",
+      "line": 2652,
+      "category": "promotional_or_banned_candidate",
+      "severity": "review",
+      "phrase": "forever",
+      "rationale": "Promotional or absolute wording; replace with measured evidence where appropriate.",
+      "context": "bounded channel forever."
+    },
+    {
+      "source": "src/journal.rs",
+      "line": 2746,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "A dropped release channel means the stall never ends and"
+    },
+    {
+      "source": "src/journal.rs",
+      "line": 2766,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "The Finalize command was accepted but the writer never replies"
+    },
+    {
+      "source": "src/latency.rs",
+      "line": 44,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Startup period excluded from skew measurement. Initial snapshots are large,"
+    },
+    {
+      "source": "src/latency.rs",
+      "line": 49,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Bound on pending cross-replica matches. A replica that never sees an event"
+    },
+    {
+      "source": "src/latency.rs",
+      "line": 323,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ (HTTP 525). A fatal failure such as an authentication rejection is never"
+    },
+    {
+      "source": "src/metrics.rs",
+      "line": 861,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ is down. The endpoint always answers 200 OK: the process is alive"
+    },
+    {
+      "source": "src/model.rs",
+      "line": 83,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "Never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Human-readable exchange grid label. Never use this for pricing logic;"
+    },
+    {
+      "source": "src/model.rs",
+      "line": 336,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Updated human-readable grid label, never used for pricing."
+    },
+    {
+      "source": "src/model.rs",
+      "line": 340,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "some",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ Invalidate some or all source-local books and wait for snapshots."
+    },
+    {
+      "source": "src/model.rs",
+      "line": 365,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ from a later connection epoch."
+    },
+    {
+      "source": "src/orderbook.rs",
+      "line": 82,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ malformed snapshot change book state in a way the venue never"
+    },
+    {
+      "source": "src/orderbook.rs",
+      "line": 307,
+      "category": "tautology",
+      "severity": "error",
+      "phrase": "same exact",
+      "rationale": "High-confidence redundant construction; inspect context before correction.",
+      "context": "Duplicate asks are malformed too, with the same exact error."
+    },
+    {
+      "source": "src/persistence.rs",
+      "line": 5,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "slow",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "! pending version is replaced instead of queued, so a slow disk cannot grow an"
+    },
+    {
+      "source": "src/persistence.rs",
+      "line": 73,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Kept only by public handles, never by the worker. Its final drop is the"
+    },
+    {
+      "source": "src/persistence.rs",
+      "line": 241,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "worker but did not join it, so a later call must retry rather"
+    },
+    {
+      "source": "src/persistence.rs",
+      "line": 270,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "actually",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "Retire the completion receiver only after it actually completed."
+    },
+    {
+      "source": "src/persistence.rs",
+      "line": 314,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "A later generation can have been accepted while this job was in"
+    },
+    {
+      "source": "src/persistence.rs",
+      "line": 315,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "flight. It remains pending and must never be reported as completed."
+    },
+    {
+      "source": "src/replay.rs",
+      "line": 172,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "they reach the core: serialization must never fall back to"
+    },
+    {
+      "source": "src/session.rs",
+      "line": 156,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ moment. Snapshot events sent later by this worker carry a strictly"
+    },
+    {
+      "source": "src/session.rs",
+      "line": 177,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Shared across every worker so the process never exceeds the configured"
+    },
+    {
+      "source": "src/session.rs",
+      "line": 685,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "control was applied; any later recovery snapshot must be newer."
+    },
+    {
+      "source": "src/session.rs",
+      "line": 864,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Advances the receive fence exactly once per payload read \u2014 before any"
+    },
+    {
+      "source": "src/session.rs",
+      "line": 1072,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "A TCP listener that accepts and never upgrades the handshake. The"
+    },
+    {
+      "source": "src/session.rs",
+      "line": 1230,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Drain until the channel closes so status/fatal sends never"
+    },
+    {
+      "source": "src/time.rs",
+      "line": 7,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "! (`Instant`/Tokio) instead; they are never serialized. Replay feeds fixture"
+    },
+    {
+      "source": "src/util/aligned_sbe_reader.rs",
+      "line": 1,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "fast",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "! Defines the [`AlignedSbeReader`], a fast reader for SBE messages written by"
+    },
+    {
+      "source": "src/util/aligned_sbe_reader.rs",
+      "line": 30,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "always",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ A chunk is always addressable as `usize`; clamp a larger file remainder to"
+    },
+    {
+      "source": "src/util/aligned_sbe_reader.rs",
+      "line": 37,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantee",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Rust targets guarantee `usize` is no wider than `u64`."
+    },
+    {
+      "source": "src/util/aligned_sbe_reader.rs",
+      "line": 47,
+      "category": "filler",
+      "severity": "review",
+      "phrase": "very",
+      "rationale": "Potential filler or unsupported emphasis; some technical uses are valid.",
+      "context": "/ The design targets aeron-spec SBE reads from disk at very high rates -- 100M"
+    },
+    {
+      "source": "src/util/aligned_sbe_reader.rs",
+      "line": 49,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ the background -- through a small API: reads are prefetched and the file is"
+    },
+    {
+      "source": "src/util/aligned_sbe_reader.rs",
+      "line": 86,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ never loads the whole capture into memory. The largest candidate is"
+    },
+    {
+      "source": "src/util/aligned_sbe_writer.rs",
+      "line": 3,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "! The file format is the template's: messages never cross a chunk boundary;"
+    },
+    {
+      "source": "src/util/aligned_sbe_writer.rs",
+      "line": 34,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ Bytes of `buf` already handed to `writer`, so a flush never repeats"
+    },
+    {
+      "source": "src/util/aligned_sbe_writer.rs",
+      "line": 190,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ graceful close later pads the final chunk to the configured alignment."
+    },
+    {
+      "source": "src/verify.rs",
+      "line": 118,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "suppressed update emptied a book; only a later non-empty"
+    },
+    {
+      "source": "src/writer.rs",
+      "line": 11,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "! queue can delay that transition but never silently abandon the worker."
+    },
+    {
+      "source": "src/writer.rs",
+      "line": 807,
+      "category": "promotional_or_banned_candidate",
+      "severity": "review",
+      "phrase": "forever",
+      "rationale": "Promotional or absolute wording; replace with measured evidence where appropriate.",
+      "context": "/ wedged writer from deadlocking the whole collector forever."
+    },
+    {
+      "source": "src/writer.rs",
+      "line": 865,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/    is saturated the command is not delivered, but that must never"
+    },
+    {
+      "source": "src/writer.rs",
+      "line": 913,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantee",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Close admission. This is the only way to guarantee termination of"
+    },
+    {
+      "source": "src/writer.rs",
+      "line": 1406,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "The timed-out send never entered the queue: exactly the three"
+    },
+    {
+      "source": "src/ws.rs",
+      "line": 1,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "Small",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "! Small helpers shared by the exchange websocket sessions."
+    },
+    {
+      "source": "src/ws.rs",
+      "line": 63,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ `base + ordinal`, so parallel connections never collide on one local"
+    },
+    {
+      "source": "src/ws.rs",
+      "line": 87,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ `TCP_NODELAY`, bind a source address, and race several full handshakes."
+    },
+    {
+      "source": "src/ws.rs",
+      "line": 231,
+      "category": "promotional_or_banned_candidate",
+      "severity": "review",
+      "phrase": "forever",
+      "rationale": "Promotional or absolute wording; replace with measured evidence where appropriate.",
+      "context": "/ fatal instead of being retried forever."
+    },
+    {
+      "source": "src/ws.rs",
+      "line": 300,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "A server that accepts the TCP connection but never answers the"
+    },
+    {
+      "source": "tests/e2e_mock_exchange.rs",
+      "line": 364,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "/ here must later appear in the raw-frame journal exactly once."
+    },
+    {
+      "source": "tests/e2e_mock_exchange.rs",
+      "line": 364,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ here must later appear in the raw-frame journal exactly once."
+    },
+    {
+      "source": "tests/e2e_mock_exchange.rs",
+      "line": 2209,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ the reconnect it triggers, and the receive fence advances exactly once per"
+    },
+    {
+      "source": "tests/e2e_mock_exchange.rs",
+      "line": 2212,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "guarantees",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "/ accounting failure, so this scenario asserts per-payload guarantees rather"
+    },
+    {
+      "source": "tests/e2e_mock_exchange.rs",
+      "line": 2300,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "exactly once",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "Every payload that was read advanced the fence exactly once, across"
+    },
+    {
+      "source": "tests/e2e_mock_exchange.rs",
+      "line": 2515,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "At large scale this can take significantly longer than the subscription handshake."
+    },
+    {
+      "source": "tests/e2e_mock_exchange.rs",
+      "line": 2540,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "large",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "The published deltas can sit behind a large initial-snapshot backlog."
+    },
+    {
+      "source": "tests/live_polymarket.rs",
+      "line": 3,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "! This is ignored by default so offline CI never depends on a"
+    },
+    {
+      "source": "git-commit:3da31e84cb88:body",
+      "line": 10,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "later",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "progress and keeps the later strict sent-versus-journaled equality."
+    },
+    {
+      "source": "git-commit:\n275f78f6a3c:body",
+      "line": 4,
+      "category": "vague_quantifier_or_scope",
+      "severity": "review",
+      "phrase": "several",
+      "rationale": "Replace with an exact threshold or explicit qualification when behavior depends on scope.",
+      "context": "several intermediate commits had red CI and that promotion rests on"
+    },
+    {
+      "source": "git-commit:\nef1d0e65a85:body",
+      "line": 2,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "decoded and then rejected (sequence gap, unhandled server error) never"
+    },
+    {
+      "source": "git-commit:\n4f4b11eb294:body",
+      "line": 7,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "marks the run failed, and never claims finalization; a writer still"
+    },
+    {
+      "source": "git-commit:\n4f4b11eb294:body",
+      "line": 12,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "saturated queue, a Finalize command accepted but never answered,"
+    },
+    {
+      "source": "git-commit:\ne2d8fb6e03a:body",
+      "line": 6,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "run, and mark_failed never overrides Finalized. Concurrent producers"
+    },
+    {
+      "source": "git-commit:\n24bf8668a6c:body",
+      "line": 4,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "regression tests cover a server that accepts TCP and never upgrades: the"
+    },
+    {
+      "source": "git-commit:\n30f377e06e3:body",
+      "line": 6,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "timestamp never precedes the replacement book's data, and the shadow's"
+    },
+    {
+      "source": "git-commit:\n286271e1e07:body",
+      "line": 4,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "regression test proves the timed-out message is never written."
+    },
+    {
+      "source": "git-commit:\n417a1b5a904:body",
+      "line": 14,
+      "category": "unsupported_absolute_or_guarantee",
+      "severity": "review",
+      "phrase": "never",
+      "rationale": "Require a defined scope, failure model and supporting evidence; valid normative uses remain.",
+      "context": "present-but-malformed (decode error); SBE serialization never"
+    }
+  ],
+  "policy": {
+    "strict_fails_on": "tautology",
+    "review_categories_are_candidates": true,
+    "automatic_rewrites": false
+  },
+  "classification": {
+    "confirmed_defects": 1,
+    "review_candidates": 292,
+    "historical_commit_findings": 10,
+    "identified_false_positives": 1,
+    "category_disposition": {
+      "tautology": "Confirmed defect at src/orderbook.rs:307. Correct in a separate behavior-neutral PR.",
+      "promotional_or_banned_candidate": "Valid technical use in all 5 cases: bounded retries, blocked writers, a rejected format alternative, and a clock-synchronization limitation.",
+      "filler": "Explanatory or historical prose in 11 cases. No technical meaning depends on the flagged word.",
+      "informal_or_ambiguous_verb": "Valid technical use in 8 cases: last-known-good checkpoint, malformed-entry handling, and a latency-methodology phrase.",
+      "unsupported_absolute_or_guarantee": "Review candidates in 150 cases. Most are scoped invariants, test assertions, or historical evidence. Individual evidence review remains open; no bulk rewrite.",
+      "vague_quantifier_or_scope": "Review candidates in 118 cases. Most are explanatory prose or parameter descriptions. Individual threshold review remains open; no bulk rewrite."
+    },
+    "review_notes": [
+      {
+        "source": "src/orderbook.rs",
+        "line": 307,
+        "category": "tautology",
+        "disposition": "confirmed_defect",
+        "reason": "Redundant same/exact construction in a source comment.",
+        "action": "Correct in a separate one-line PR."
+      },
+      {
+        "source": "src/exchange/polymarket/codec.rs",
+        "line": 299,
+        "category": "vague_quantifier_or_scope",
+        "disposition": "false_positive",
+        "reason": "Quoted Rust Option identifier in a comment, not an imprecise quantity."
+      },
+      {
+        "source": "git-commit:*",
+        "line": 0,
+        "category": "all",
+        "disposition": "historical_evidence",
+        "reason": "Ten findings occur in existing commit bodies. Historical commit messages are preserved and the standard applies to new commits."
+      }
+    ],
+    "basis": "Category-level review of the exact baseline tree. Only high-confidence tautology is classified as a defect. Review candidates remain visible and are not authorization for automatic or bulk replacement.",
+    "valid_technical_use_or_explanatory": 24,
+    "open_review_candidates": 257
+  }
+}

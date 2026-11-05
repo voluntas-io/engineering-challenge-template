@@ -4,6 +4,8 @@
 
 One behavioral objective per PR. Each PR includes a regression test, source-pinned verification note, updated architecture/test inventory and explicit non-goals. Do not combine new protocol semantics, storage migration and new trading behavior in one change.
 
+The [assurance baseline](../../assurance/README.md) applies to every phase: requirements and evidence precede implementation, Rust correctness rules are mandatory, financial controls are explicit, and verification records pin the reviewed commit. A phase gate is not satisfied by a successful build alone.
+
 ## Phase 0 — Land and freeze the current collector
 
 **Objective:** move the integration baseline to `main` without conflating independent behavior.
