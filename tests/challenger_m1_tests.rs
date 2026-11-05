@@ -2,9 +2,9 @@
 //! - parse_dollars_fp edge cases (negative zero, tiny fractions, boundary values, invalid strings)
 //! - Orderbook::apply_delta & apply_snapshot_side (bursts of negative deltas, stale clocks, unquoted deletions, oracle model)
 
+use engineering_challenge::Side;
 use engineering_challenge::kalshi::parse_dollars_fp;
 use engineering_challenge::orderbook::Orderbook;
-use engineering_challenge::Side;
 use std::collections::HashMap;
 
 // ============================================================================
@@ -65,7 +65,7 @@ fn test_parse_tiny_negative_fractions() {
         ("-0.1", -100_000),
         ("-0.999999", -999_999),
         ("-1.000001", -1_000_001),
-        ("-0.0000001", 0), // 7 decimal places: 6th place is 0, 7th ignored -> 0
+        ("-0.0000001", 0),  // 7 decimal places: 6th place is 0, 7th ignored -> 0
         ("-0.0000019", -1), // 7 decimal places: 6th place is 1 micro, 7th ignored -> -1
     ];
 
@@ -154,11 +154,9 @@ fn test_parse_invalid_strings() {
     for &s in &invalid {
         let res = parse_dollars_fp(s);
         assert_eq!(
-            res,
-            None,
+            res, None,
             "Expected invalid string {:?} to return None, got {:?}",
-            s,
-            res
+            s, res
         );
     }
 }
@@ -378,7 +376,10 @@ fn test_orderbook_unquoted_deletions() {
     assert_eq!(ob.bids[&450_000], 100_000);
     let prev = ob.apply_delta(Side::Buy, 450_000, i64::MIN, 1006);
     assert_eq!(prev, 100_000);
-    assert!(!ob.bids.contains_key(&450_000), "Level must be removed on extreme negative delta");
+    assert!(
+        !ob.bids.contains_key(&450_000),
+        "Level must be removed on extreme negative delta"
+    );
 }
 
 #[test]
@@ -422,7 +423,11 @@ fn test_orderbook_oracle_differential_fuzzing() {
             } else {
                 current_clock + 1
             };
-            let side = if (lcg % 2) == 0 { Side::Buy } else { Side::Sell };
+            let side = if (lcg % 2) == 0 {
+                Side::Buy
+            } else {
+                Side::Sell
+            };
 
             let count = (lcg % 10 + 1) as usize;
             let mut levels = Vec::with_capacity(count);
@@ -458,7 +463,11 @@ fn test_orderbook_oracle_differential_fuzzing() {
                 current_clock + (lcg % 3) // 0 (same clock) or 1..2 (advance)
             };
 
-            let side = if (lcg % 2) == 0 { Side::Buy } else { Side::Sell };
+            let side = if (lcg % 2) == 0 {
+                Side::Buy
+            } else {
+                Side::Sell
+            };
             let price = 300_000 + ((lcg % 25) as i64 * 10_000);
             let is_negative = (lcg % 3) == 0;
             let delta_qty = if is_negative {
@@ -477,7 +486,11 @@ fn test_orderbook_oracle_differential_fuzzing() {
                     Side::Sell => &mut oracle_asks,
                 };
                 let prev = map.get(&price).copied().unwrap_or(0);
-                assert_eq!(ob_prev, prev, "Step {}: previous qty mismatch at price {}", step, price);
+                assert_eq!(
+                    ob_prev, prev,
+                    "Step {}: previous qty mismatch at price {}",
+                    step, price
+                );
                 let new_qty = prev + delta_qty;
                 if new_qty <= 0 {
                     map.remove(&price);
@@ -491,20 +504,46 @@ fn test_orderbook_oracle_differential_fuzzing() {
                     Side::Sell => &oracle_asks,
                 };
                 let cur = map.get(&price).copied().unwrap_or(0);
-                assert_eq!(ob_prev, cur, "Step {}: stale delta returned wrong qty", step);
+                assert_eq!(
+                    ob_prev, cur,
+                    "Step {}: stale delta returned wrong qty",
+                    step
+                );
             }
         }
 
         // Compare Orderbook vs Oracle
         assert_eq!(ob.clock, current_clock, "Step {}: Clock mismatch", step);
-        assert_eq!(ob.bids.len(), oracle_bids.len(), "Step {}: Bid count mismatch", step);
-        assert_eq!(ob.asks.len(), oracle_asks.len(), "Step {}: Ask count mismatch", step);
+        assert_eq!(
+            ob.bids.len(),
+            oracle_bids.len(),
+            "Step {}: Bid count mismatch",
+            step
+        );
+        assert_eq!(
+            ob.asks.len(),
+            oracle_asks.len(),
+            "Step {}: Ask count mismatch",
+            step
+        );
 
         for (&p, &q) in &oracle_bids {
-            assert_eq!(ob.bids.get(&p).copied(), Some(q), "Step {}: Bid level {} mismatch", step, p);
+            assert_eq!(
+                ob.bids.get(&p).copied(),
+                Some(q),
+                "Step {}: Bid level {} mismatch",
+                step,
+                p
+            );
         }
         for (&p, &q) in &oracle_asks {
-            assert_eq!(ob.asks.get(&p).copied(), Some(q), "Step {}: Ask level {} mismatch", step, p);
+            assert_eq!(
+                ob.asks.get(&p).copied(),
+                Some(q),
+                "Step {}: Ask level {} mismatch",
+                step,
+                p
+            );
         }
     }
 }

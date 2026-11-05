@@ -34,12 +34,19 @@ fn sbe_roundtrip_snapshot_and_delta() {
         exchange_timestamp: ts,
         symbol: symbol.clone(),
         bids: vec![
-            SnapshotBidsEntryDomain { price_level: 400_000, quantity: 2_000_000 },
-            SnapshotBidsEntryDomain { price_level: 380_000, quantity: 1_000_000 },
+            SnapshotBidsEntryDomain {
+                price_level: 400_000,
+                quantity: 2_000_000,
+            },
+            SnapshotBidsEntryDomain {
+                price_level: 380_000,
+                quantity: 1_000_000,
+            },
         ],
-        asks: vec![
-            SnapshotAsksEntryDomain { price_level: 600_000, quantity: 3_500_000 },
-        ],
+        asks: vec![SnapshotAsksEntryDomain {
+            price_level: 600_000,
+            quantity: 3_500_000,
+        }],
     };
 
     let update = PriceLevelUpdateDomain {
@@ -65,12 +72,18 @@ fn sbe_roundtrip_snapshot_and_delta() {
     let Some(AnyMessage::Snapshot(decoded_snap)) = reader.read_msg().unwrap() else {
         panic!("expected snapshot");
     };
-    assert_eq!(SnapshotDomain::try_from_decoder(decoded_snap).unwrap(), snapshot);
+    assert_eq!(
+        SnapshotDomain::try_from_decoder(decoded_snap).unwrap(),
+        snapshot
+    );
 
     let Some(AnyMessage::PriceLevelUpdate(decoded_upd)) = reader.read_msg().unwrap() else {
         panic!("expected price level update");
     };
-    assert_eq!(PriceLevelUpdateDomain::try_from_decoder(decoded_upd).unwrap(), update);
+    assert_eq!(
+        PriceLevelUpdateDomain::try_from_decoder(decoded_upd).unwrap(),
+        update
+    );
 
     assert!(reader.read_msg().unwrap().is_none(), "expected EOF");
 }
@@ -154,4 +167,3 @@ fn sbe_roundtrip_sell_side_delta() {
     assert_eq!(decoded, update);
     assert_eq!(decoded.side, Side::Sell);
 }
-

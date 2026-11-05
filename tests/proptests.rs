@@ -6,34 +6,30 @@
 //! - SBE serialization roundtrips (PriceLevelUpdateDomain, SnapshotDomain)
 //! - Aligned SBE chunk boundary framing & zero-padded chunk streaming
 
-use std::collections::BTreeMap;
 use chrono::{DateTime, Utc};
 use proptest::prelude::*;
+use std::collections::BTreeMap;
 
+use engineering_challenge::adapter::{ExchangeAdapter, InboundMessage};
+use engineering_challenge::auth::Credential;
+use engineering_challenge::kalshi::KalshiAdapter;
 use engineering_challenge::kalshi::{parse_dollars_fp, parse_qty_fp};
 use engineering_challenge::orderbook::Orderbook;
+use engineering_challenge::util::dtos::SbeEncode;
 use engineering_challenge::util::dtos::challenge_orderbook::{
     AnyMessage, PriceLevelUpdateDomain, SnapshotAsksEntryDomain, SnapshotBidsEntryDomain,
     SnapshotDomain,
 };
-use engineering_challenge::util::dtos::SbeEncode;
-use std::sync::Arc;
-use engineering_challenge::adapter::{ExchangeAdapter, InboundMessage};
-use engineering_challenge::auth::Credential;
-use engineering_challenge::kalshi::KalshiAdapter;
-use engineering_challenge::util::{
-    AlignedSbeReader, AlignedSbeWriter, OrderbookSchema,
-};
+use engineering_challenge::util::{AlignedSbeReader, AlignedSbeWriter, OrderbookSchema};
 use engineering_challenge::{InvalidSide, Side};
+use std::sync::Arc;
 
 const BENCH_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
 MC4CAQAwBQYDK2VwBCIEIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
 -----END PRIVATE KEY-----";
 
 fn test_adapter() -> KalshiAdapter {
-    let cred = Arc::new(
-        Credential::from_pem("test-key-id", BENCH_PEM).expect("valid Ed25519 PEM"),
-    );
+    let cred = Arc::new(Credential::from_pem("test-key-id", BENCH_PEM).expect("valid Ed25519 PEM"));
     KalshiAdapter::new(cred)
 }
 
@@ -41,10 +37,10 @@ fn test_adapter() -> KalshiAdapter {
 
 fn valid_dollar_string_strategy() -> impl Strategy<Value = (String, i64)> {
     (
-        any::<bool>(), // negative
-        0..2u8,        // sign prefix: 0 = none, 1 = explicit sign (+ or -)
-        0..10_000i64,  // integer part
-        0..=8usize,    // number of fractional digits
+        any::<bool>(),   // negative
+        0..2u8,          // sign prefix: 0 = none, 1 = explicit sign (+ or -)
+        0..10_000i64,    // integer part
+        0..=8usize,      // number of fractional digits
         0..1_000_000i64, // fractional value
     )
         .prop_map(|(negative, sign_style, int_val, frac_len, frac_val)| {
@@ -58,7 +54,11 @@ fn valid_dollar_string_strategy() -> impl Strategy<Value = (String, i64)> {
 
             if frac_len == 0 {
                 let s = format!("{}{}", sign_str, int_val);
-                let val = if negative { -int_val * 1_000_000 } else { int_val * 1_000_000 };
+                let val = if negative {
+                    -int_val * 1_000_000
+                } else {
+                    int_val * 1_000_000
+                };
                 (s, val)
             } else {
                 let frac_str_full = format!("{:06}", frac_val);

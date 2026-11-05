@@ -12,10 +12,10 @@
 //!
 //! Levels with quantity ≤ 0 are removed from the book.
 
-use std::collections::{btree_map::Entry, BTreeMap};
+use std::collections::{BTreeMap, btree_map::Entry};
 
-use chrono::{DateTime, Utc};
 use crate::Side;
+use chrono::{DateTime, Utc};
 
 // ── Public event types ────────────────────────────────────────────────────────
 
@@ -167,4 +167,3 @@ impl Orderbook {
             .collect()
     }
 }
-

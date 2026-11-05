@@ -56,10 +56,16 @@ fn test_aligned_sbe_writer_message_exceeds_chunk_capacity() {
     };
 
     let msg_len = update.encoded_length_with_header().unwrap();
-    assert!(msg_len > 24, "Message len ({msg_len}) should exceed payload_limit (24)");
+    assert!(
+        msg_len > 24,
+        "Message len ({msg_len}) should exceed payload_limit (24)"
+    );
 
     let res = writer.write_msg(&update);
-    assert!(res.is_err(), "write_msg should return error when message > payload_limit");
+    assert!(
+        res.is_err(),
+        "write_msg should return error when message > payload_limit"
+    );
     assert_eq!(
         res.unwrap_err().to_string(),
         "SBE message does not fit in a chunk"
@@ -68,7 +74,11 @@ fn test_aligned_sbe_writer_message_exceeds_chunk_capacity() {
     // Verify writer buffer remains empty and clean
     writer.flush().unwrap();
     let metadata = std::fs::metadata(tmp.path()).unwrap();
-    assert_eq!(metadata.len(), 0, "No chunks should be written for rejected message");
+    assert_eq!(
+        metadata.len(),
+        0,
+        "No chunks should be written for rejected message"
+    );
 }
 
 #[test]
@@ -114,11 +124,17 @@ fn test_aligned_sbe_writer_exact_payload_limit_boundary() {
     let bytes = std::fs::read(tmp.path()).unwrap();
     let chunk1_trailer = &bytes[msg_len..chunk_size];
     assert_eq!(chunk1_trailer.len(), 8);
-    assert_eq!(chunk1_trailer, &[0u8; 8], "Chunk 1 must end with 8 zero bytes as sentinel");
+    assert_eq!(
+        chunk1_trailer, &[0u8; 8],
+        "Chunk 1 must end with 8 zero bytes as sentinel"
+    );
 
     let chunk2_trailer = &bytes[chunk_size + msg_len..chunk_size * 2];
     assert_eq!(chunk2_trailer.len(), 8);
-    assert_eq!(chunk2_trailer, &[0u8; 8], "Chunk 2 must end with 8 zero bytes as sentinel");
+    assert_eq!(
+        chunk2_trailer, &[0u8; 8],
+        "Chunk 2 must end with 8 zero bytes as sentinel"
+    );
 }
 
 #[test]
@@ -152,7 +168,10 @@ fn test_aligned_sbe_writer_multi_chunk_rotation_stress() {
         "File size ({file_len}) must be an exact integer multiple of chunk size ({chunk_size})"
     );
     let num_chunks = file_len / chunk_size;
-    assert!(num_chunks > 50, "Expected >50 chunk rotations, got {num_chunks}");
+    assert!(
+        num_chunks > 50,
+        "Expected >50 chunk rotations, got {num_chunks}"
+    );
 
     // Verify that every chunk has at least 8 trailing zeros
     let file_bytes = std::fs::read(tmp.path()).unwrap();
@@ -161,8 +180,7 @@ fn test_aligned_sbe_writer_multi_chunk_rotation_stress() {
         let chunk_end = chunk_start + chunk_size;
         let chunk_trailer = &file_bytes[chunk_end - 8..chunk_end];
         assert_eq!(
-            chunk_trailer,
-            &[0u8; 8],
+            chunk_trailer, &[0u8; 8],
             "Chunk {chunk_idx} must end with 8 zero padding bytes"
         );
     }
@@ -195,7 +213,11 @@ fn test_aligned_sbe_writer_multi_chunk_rotation_stress() {
                 let domain = PriceLevelUpdateDomain::try_from_decoder(upd).unwrap();
                 let expected_price = (decoded_count as i64) * 1000 + 100;
                 let expected_qty = (decoded_count as i64 + 1) * 250_000;
-                let expected_side = if decoded_count % 2 == 0 { Side::Buy } else { Side::Sell };
+                let expected_side = if decoded_count % 2 == 0 {
+                    Side::Buy
+                } else {
+                    Side::Sell
+                };
                 let expected_sym = format!("TICK-{:03}", decoded_count % 10);
 
                 assert_eq!(domain.price_level, expected_price);
@@ -208,7 +230,10 @@ fn test_aligned_sbe_writer_multi_chunk_rotation_stress() {
         }
         offset += msg_len;
     }
-    assert_eq!(decoded_count, NUM_MESSAGES, "All 300 messages must be accurately decoded");
+    assert_eq!(
+        decoded_count, NUM_MESSAGES,
+        "All 300 messages must be accurately decoded"
+    );
 }
 
 #[test]
@@ -311,8 +336,14 @@ fn test_aligned_sbe_writer_reader_roundtrip_standard_chunk() {
         received_at: ts,
         exchange_timestamp: ts,
         symbol: "BTC-ROUNDTRIP".to_owned(),
-        bids: vec![SnapshotBidsEntryDomain { price_level: 499_000, quantity: 1_500_000 }],
-        asks: vec![SnapshotAsksEntryDomain { price_level: 501_000, quantity: 2_000_000 }],
+        bids: vec![SnapshotBidsEntryDomain {
+            price_level: 499_000,
+            quantity: 1_500_000,
+        }],
+        asks: vec![SnapshotAsksEntryDomain {
+            price_level: 501_000,
+            quantity: 2_000_000,
+        }],
     };
 
     writer.write_msg(&update).unwrap();
@@ -321,7 +352,10 @@ fn test_aligned_sbe_writer_reader_roundtrip_standard_chunk() {
     drop(writer);
 
     let mut reader = AlignedSbeReader::<OrderbookSchema>::open(tmp.path()).unwrap();
-    let msg1 = reader.read_msg().unwrap().expect("First message must exist");
+    let msg1 = reader
+        .read_msg()
+        .unwrap()
+        .expect("First message must exist");
     match msg1 {
         AnyMessage::PriceLevelUpdate(u) => {
             let d = PriceLevelUpdateDomain::try_from_decoder(u).unwrap();
@@ -330,7 +364,10 @@ fn test_aligned_sbe_writer_reader_roundtrip_standard_chunk() {
         _ => panic!("Expected PriceLevelUpdate"),
     }
 
-    let msg2 = reader.read_msg().unwrap().expect("Second message must exist");
+    let msg2 = reader
+        .read_msg()
+        .unwrap()
+        .expect("Second message must exist");
     match msg2 {
         AnyMessage::Snapshot(s) => {
             let d = SnapshotDomain::try_from_decoder(s).unwrap();
@@ -339,7 +376,10 @@ fn test_aligned_sbe_writer_reader_roundtrip_standard_chunk() {
         _ => panic!("Expected Snapshot"),
     }
 
-    assert!(reader.read_msg().unwrap().is_none(), "Reader should reach clean EOF");
+    assert!(
+        reader.read_msg().unwrap().is_none(),
+        "Reader should reach clean EOF"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -418,11 +458,20 @@ fn test_backoff_mathematical_bounds_and_overflow_safety() {
     assert_eq!(oracle_calculate_backoff(8), Duration::from_millis(10_000));
     assert_eq!(oracle_calculate_backoff(9), Duration::from_millis(10_000));
     assert_eq!(oracle_calculate_backoff(50), Duration::from_millis(10_000));
-    assert_eq!(oracle_calculate_backoff(1000), Duration::from_millis(10_000));
+    assert_eq!(
+        oracle_calculate_backoff(1000),
+        Duration::from_millis(10_000)
+    );
 
     // Extreme edge cases: u32::MAX must never panic with overflow
-    assert_eq!(oracle_calculate_backoff(u32::MAX), Duration::from_millis(10_000));
-    assert_eq!(oracle_calculate_backoff(u32::MAX - 1), Duration::from_millis(10_000));
+    assert_eq!(
+        oracle_calculate_backoff(u32::MAX),
+        Duration::from_millis(10_000)
+    );
+    assert_eq!(
+        oracle_calculate_backoff(u32::MAX - 1),
+        Duration::from_millis(10_000)
+    );
 }
 
 #[test]
@@ -444,8 +493,14 @@ fn test_staggered_reconnect_schedule_invariants() {
     }
 
     // Socket 0 is at +600s, Socket 1 is at +300s
-    assert_eq!(socket_reconnect_at[0].duration_since(now), Duration::from_secs(600));
-    assert_eq!(socket_reconnect_at[1].duration_since(now), Duration::from_secs(300));
+    assert_eq!(
+        socket_reconnect_at[0].duration_since(now),
+        Duration::from_secs(600)
+    );
+    assert_eq!(
+        socket_reconnect_at[1].duration_since(now),
+        Duration::from_secs(300)
+    );
 
     // Initial offset difference between sockets is exactly 300s (half interval)
     let initial_diff = socket_reconnect_at[0].duration_since(socket_reconnect_at[1]);
@@ -456,7 +511,11 @@ fn test_staggered_reconnect_schedule_invariants() {
 
     for cycle in 0..10 {
         // Find next expiring socket
-        let next_idx = if socket_reconnect_at[0] <= socket_reconnect_at[1] { 0 } else { 1 };
+        let next_idx = if socket_reconnect_at[0] <= socket_reconnect_at[1] {
+            0
+        } else {
+            1
+        };
         let sim_now = socket_reconnect_at[next_idx];
 
         // Ensure we alternate or never reconnect both sockets at the same timestamp
@@ -495,9 +554,15 @@ async fn test_collector_shutdown_idempotence() {
     let c2 = Arc::clone(&collector);
     let c3 = Arc::clone(&collector);
 
-    let h1 = tokio::spawn(async move { c1.shutdown(); });
-    let h2 = tokio::spawn(async move { c2.shutdown(); });
-    let h3 = tokio::spawn(async move { c3.shutdown(); });
+    let h1 = tokio::spawn(async move {
+        c1.shutdown();
+    });
+    let h2 = tokio::spawn(async move {
+        c2.shutdown();
+    });
+    let h3 = tokio::spawn(async move {
+        c3.shutdown();
+    });
 
     let (r1, r2, r3) = tokio::join!(h1, h2, h3);
     assert!(r1.is_ok());

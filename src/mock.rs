@@ -3,11 +3,11 @@
 //! Generates realistic synthetic L2 snapshots and streaming deltas for the
 //! provided markets. Useful for verifying the entire pipeline end-to-end.
 
+use crate::Side;
+use anyhow::Result;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
-use anyhow::Result;
 use tokio::io::DuplexStream;
-use crate::Side;
 
 use crate::adapter::{ExchangeAdapter, InboundMessage};
 
@@ -45,19 +45,28 @@ static MOCK_REST_HOOKS: OnceLock<Mutex<Option<MockRestHook>>> = OnceLock::new();
 
 /// Register an in-process mock REST hook for `kalshi::fetch_open_markets`.
 pub fn register_mock_rest_hook(hook: MockRestHook) {
-    let mut lock = MOCK_REST_HOOKS.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let mut lock = MOCK_REST_HOOKS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap();
     *lock = Some(hook);
 }
 
 /// Unregister the in-process mock REST hook.
 pub fn unregister_mock_rest_hook() {
-    let mut lock = MOCK_REST_HOOKS.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let mut lock = MOCK_REST_HOOKS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap();
     *lock = None;
 }
 
 /// Invoked by `kalshi::fetch_open_markets` to intercept REST requests in local tests.
 pub fn take_mock_rest_response(url: &str) -> Option<Result<Vec<String>>> {
-    let lock = MOCK_REST_HOOKS.get_or_init(|| Mutex::new(None)).lock().unwrap();
+    let lock = MOCK_REST_HOOKS
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap();
     if let Some(ref hook) = *lock {
         hook(url)
     } else {
@@ -99,7 +108,8 @@ impl ExchangeAdapter for MockAdapter {
             "cmd": "subscribe",
             "id": id,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn encode_add_markets(&self, id: u64, sid: u64, tickers: &[String]) -> Result<String> {
@@ -108,7 +118,8 @@ impl ExchangeAdapter for MockAdapter {
             "id": id,
             "sid": sid,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn encode_remove_markets(&self, id: u64, sid: u64, tickers: &[String]) -> Result<String> {
@@ -117,7 +128,8 @@ impl ExchangeAdapter for MockAdapter {
             "id": id,
             "sid": sid,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn encode_get_snapshot(&self, id: u64, sid: u64, tickers: &[String]) -> Result<String> {
@@ -126,7 +138,8 @@ impl ExchangeAdapter for MockAdapter {
             "id": id,
             "sid": sid,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn decode_message(&self, text: &str) -> Result<Option<InboundMessage>> {
@@ -170,7 +183,8 @@ impl ExchangeAdapter for LoopbackMockAdapter {
             "cmd": "subscribe",
             "id": id,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn encode_add_markets(&self, id: u64, sid: u64, tickers: &[String]) -> Result<String> {
@@ -179,7 +193,8 @@ impl ExchangeAdapter for LoopbackMockAdapter {
             "id": id,
             "sid": sid,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn encode_remove_markets(&self, id: u64, sid: u64, tickers: &[String]) -> Result<String> {
@@ -188,7 +203,8 @@ impl ExchangeAdapter for LoopbackMockAdapter {
             "id": id,
             "sid": sid,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn encode_get_snapshot(&self, id: u64, sid: u64, tickers: &[String]) -> Result<String> {
@@ -197,7 +213,8 @@ impl ExchangeAdapter for LoopbackMockAdapter {
             "id": id,
             "sid": sid,
             "tickers": tickers
-        }).to_string())
+        })
+        .to_string())
     }
 
     fn decode_message(&self, text: &str) -> Result<Option<InboundMessage>> {
@@ -233,7 +250,11 @@ fn decode_mock_json(text: &str) -> Result<Option<InboundMessage>> {
             Ok(Some(InboundMessage::Subscribed { sid }))
         }
         "snapshot" => {
-            let ticker = val.get("ticker").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+            let ticker = val
+                .get("ticker")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
             let clock = val.get("clock").and_then(|v| v.as_u64()).unwrap_or(1);
             let bids = parse_levels(val.get("bids"))
                 .unwrap_or_else(|| vec![(450_000, 10_000_000), (440_000, 5_000_000)]);
@@ -247,13 +268,20 @@ fn decode_mock_json(text: &str) -> Result<Option<InboundMessage>> {
             }))
         }
         "delta" => {
-            let ticker = val.get("ticker").and_then(|v| v.as_str()).unwrap_or("").to_owned();
+            let ticker = val
+                .get("ticker")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_owned();
             let clock = val.get("clock").and_then(|v| v.as_u64()).unwrap_or(2);
             let price = val.get("price").and_then(|v| v.as_i64()).unwrap_or(450_000);
             let qty = val.get("qty").and_then(|v| v.as_i64()).unwrap_or(1_000_000);
             let side_str = val.get("side").and_then(|v| v.as_str()).unwrap_or("buy");
-            let is_buy = side_str.eq_ignore_ascii_case("buy") || side_str.eq_ignore_ascii_case("yes");
-            let exchange_ts_ms = val.get("exchange_ts_ms").and_then(|v| v.as_i64())
+            let is_buy =
+                side_str.eq_ignore_ascii_case("buy") || side_str.eq_ignore_ascii_case("yes");
+            let exchange_ts_ms = val
+                .get("exchange_ts_ms")
+                .and_then(|v| v.as_i64())
                 .or_else(|| Some(chrono::Utc::now().timestamp_millis()));
             Ok(Some(InboundMessage::Delta {
                 ticker,
@@ -266,7 +294,11 @@ fn decode_mock_json(text: &str) -> Result<Option<InboundMessage>> {
         }
         "error" => {
             let code = val.get("code").and_then(|v| v.as_i64());
-            let message = val.get("message").and_then(|v| v.as_str()).unwrap_or("error").to_owned();
+            let message = val
+                .get("message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("error")
+                .to_owned();
             Ok(Some(InboundMessage::Error { code, message }))
         }
         _ => Ok(None),

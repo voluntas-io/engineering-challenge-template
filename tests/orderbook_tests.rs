@@ -2,8 +2,8 @@
 
 #[cfg(test)]
 mod tests {
-    use engineering_challenge::orderbook::Orderbook;
     use engineering_challenge::Side;
+    use engineering_challenge::orderbook::Orderbook;
 
     // ── Snapshot tests ────────────────────────────────────────────────────────
 
@@ -107,22 +107,14 @@ mod tests {
     #[test]
     fn best_bid_is_highest_price() {
         let mut ob = Orderbook::default();
-        ob.apply_snapshot_side(
-            Side::Buy,
-            &[(300_000, 1), (400_000, 1), (350_000, 1)],
-            1,
-        );
+        ob.apply_snapshot_side(Side::Buy, &[(300_000, 1), (400_000, 1), (350_000, 1)], 1);
         assert_eq!(ob.best_bid().unwrap().0, 400_000);
     }
 
     #[test]
     fn best_ask_is_lowest_price() {
         let mut ob = Orderbook::default();
-        ob.apply_snapshot_side(
-            Side::Sell,
-            &[(700_000, 1), (600_000, 1), (650_000, 1)],
-            1,
-        );
+        ob.apply_snapshot_side(Side::Sell, &[(700_000, 1), (600_000, 1), (650_000, 1)], 1);
         assert_eq!(ob.best_ask().unwrap().0, 600_000);
     }
 
@@ -154,7 +146,10 @@ mod tests {
         // Stale delta with clock = 50 should be ignored
         let prev = ob.apply_delta(Side::Buy, 400_000, 500_000, 50);
         assert_eq!(prev, 1_000_000);
-        assert_eq!(ob.bids[&400_000], 1_000_000, "stale delta must not mutate quantity");
+        assert_eq!(
+            ob.bids[&400_000], 1_000_000,
+            "stale delta must not mutate quantity"
+        );
         assert_eq!(ob.clock, 100, "clock must remain at 100");
     }
 
@@ -167,7 +162,10 @@ mod tests {
         // Stale snapshot with clock = 50 should be ignored
         ob.apply_snapshot_side(Side::Buy, &[(300_000, 500_000)], 50);
         assert_eq!(ob.bids.len(), 1);
-        assert_eq!(ob.bids[&400_000], 1_000_000, "stale snapshot must not overwrite book");
+        assert_eq!(
+            ob.bids[&400_000], 1_000_000,
+            "stale snapshot must not overwrite book"
+        );
         assert_eq!(ob.clock, 100, "clock must remain at 100");
     }
 
@@ -176,7 +174,10 @@ mod tests {
         let mut ob = Orderbook::default();
         let prev = ob.apply_delta(Side::Buy, 300_000, -500_000, 1);
         assert_eq!(prev, 0);
-        assert!(ob.bids.is_empty(), "negative delta on nonexistent level must not insert node");
+        assert!(
+            ob.bids.is_empty(),
+            "negative delta on nonexistent level must not insert node"
+        );
     }
 
     #[test]
@@ -184,7 +185,10 @@ mod tests {
         let mut ob = Orderbook::default();
         let prev = ob.apply_delta(Side::Buy, 300_000, 0, 1);
         assert_eq!(prev, 0);
-        assert!(ob.bids.is_empty(), "zero delta on nonexistent level must not insert node");
+        assert!(
+            ob.bids.is_empty(),
+            "zero delta on nonexistent level must not insert node"
+        );
     }
 
     #[test]
@@ -202,5 +206,3 @@ mod tests {
         assert!(!ob.bids.contains_key(&400_000));
     }
 }
-
-

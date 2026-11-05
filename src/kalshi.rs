@@ -137,7 +137,11 @@ impl ExchangeAdapter for KalshiAdapter {
         if env.msg_type == "orderbook_snapshot" {
             if let Some(snap) = decode_snapshot(msg_val) {
                 let bids = snap.yes_bids;
-                let asks = snap.no_bids.iter().map(|(p, q)| (1_000_000 - p, *q)).collect();
+                let asks = snap
+                    .no_bids
+                    .iter()
+                    .map(|(p, q)| (1_000_000 - p, *q))
+                    .collect();
                 return Ok(Some(InboundMessage::Snapshot {
                     ticker: snap.market_ticker,
                     clock: snap.clock,
@@ -205,9 +209,11 @@ pub async fn fetch_open_markets(client: &reqwest::Client) -> Result<Vec<String>>
         .unwrap_or_else(|| "1000".to_string());
 
     loop {
-        let mut req = client
-            .get(format!("{rest_base}/markets"))
-            .query(&[("status", "open"), ("limit", limit_str.as_str()), ("mve_filter", "exclude")]);
+        let mut req = client.get(format!("{rest_base}/markets")).query(&[
+            ("status", "open"),
+            ("limit", limit_str.as_str()),
+            ("mve_filter", "exclude"),
+        ]);
 
         if let Some(ref c) = cursor {
             req = req.query(&[("cursor", c.as_str())]);

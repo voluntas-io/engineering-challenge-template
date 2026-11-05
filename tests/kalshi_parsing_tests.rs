@@ -91,7 +91,11 @@ mod tests {
         for cents in 1..100u32 {
             let p = (cents * 10_000) as i64;
             let comp = 1_000_000 - p;
-            assert_eq!(1_000_000 - comp, p, "complement of complement must be original price");
+            assert_eq!(
+                1_000_000 - comp,
+                p,
+                "complement of complement must be original price"
+            );
         }
     }
 
@@ -120,10 +124,7 @@ mod tests {
     #[test]
     fn level_array_roundtrip() {
         // Simulate what decode_snapshot does for yes_dollars_fp
-        let raw = serde_json::json!([
-            ["0.4200", "13.00"],
-            ["0.3100", "10.00"],
-        ]);
+        let raw = serde_json::json!([["0.4200", "13.00"], ["0.3100", "10.00"],]);
         let levels: Vec<(i64, i64)> = raw
             .as_array()
             .unwrap()
@@ -187,5 +188,3 @@ mod tests {
         assert_eq!(parse_dollars_fp("  0.4200 "), Some(420_000));
     }
 }
-
-

@@ -7,11 +7,11 @@
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 
+use crate::Side;
+use crate::util::AlignedSbeWriter;
 use crate::util::dtos::challenge_orderbook::{
     PriceLevelUpdateDomain, SnapshotAsksEntryDomain, SnapshotBidsEntryDomain, SnapshotDomain,
 };
-use crate::util::AlignedSbeWriter;
-use crate::Side;
 
 use crate::orderbook::PriceLevel;
 
@@ -108,4 +108,3 @@ impl Drop for Output {
         let _ = self.writer.flush();
     }
 }
-

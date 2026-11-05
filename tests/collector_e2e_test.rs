@@ -25,9 +25,7 @@ async fn test_collector_pipeline_e2e() {
     let collector = Arc::new(Collector::new(adapter).await.unwrap());
     let collector_clone = Arc::clone(&collector);
 
-    let run_handle = tokio::spawn(async move {
-        collector_clone.run().await
-    });
+    let run_handle = tokio::spawn(async move { collector_clone.run().await });
 
     // Let it run for 1.5 seconds to receive synthetic snapshots & deltas
     tokio::time::sleep(Duration::from_millis(1500)).await;
@@ -51,6 +49,9 @@ async fn test_collector_pipeline_e2e() {
     }
 
     println!("Decoded {snapshot_count} snapshots and {delta_count} deltas");
-    assert!(snapshot_count > 0, "should have written at least one snapshot");
+    assert!(
+        snapshot_count > 0,
+        "should have written at least one snapshot"
+    );
     assert!(delta_count > 0, "should have written at least one delta");
 }

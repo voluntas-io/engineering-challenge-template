@@ -33,18 +33,17 @@ impl Credential {
     /// `KALSHI_PRIVATE_KEY` — PEM private key (inline, newlines as `\n`)
     ///                        OR path if the value starts with `/` or `./`
     pub fn from_env() -> Result<Self> {
-        let key_id = std::env::var("KALSHI_API_KEY_ID")
-            .context("KALSHI_API_KEY_ID env var not set")?;
-        let raw = std::env::var("KALSHI_PRIVATE_KEY")
-            .context("KALSHI_PRIVATE_KEY env var not set")?;
+        let key_id =
+            std::env::var("KALSHI_API_KEY_ID").context("KALSHI_API_KEY_ID env var not set")?;
+        let raw =
+            std::env::var("KALSHI_PRIVATE_KEY").context("KALSHI_PRIVATE_KEY env var not set")?;
 
         let pem = if raw.trim_start().starts_with("-----") {
             // Inline PEM – replace literal `\n` with real newlines for convenience
             raw.replace("\\n", "\n")
         } else {
             // Treat as file path
-            std::fs::read_to_string(raw.trim())
-                .context("reading KALSHI_PRIVATE_KEY file")?
+            std::fs::read_to_string(raw.trim()).context("reading KALSHI_PRIVATE_KEY file")?
         };
 
         Self::from_pem(&key_id, &pem)
@@ -62,9 +61,11 @@ impl Credential {
             });
         }
 
-        bail!("Could not parse private key as Ed25519 PKCS#8. \
+        bail!(
+            "Could not parse private key as Ed25519 PKCS#8. \
                RSA keys are not yet supported by this collector. \
-               Please generate an Ed25519 key on the Kalshi dashboard.")
+               Please generate an Ed25519 key on the Kalshi dashboard."
+        )
     }
 
     /// Load from a PEM **file** path.
@@ -122,4 +123,3 @@ impl AuthHeaders {
         ]
     }
 }
-

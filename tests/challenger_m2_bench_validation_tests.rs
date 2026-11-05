@@ -7,17 +7,17 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
+use engineering_challenge::Side;
 use engineering_challenge::adapter::ExchangeAdapter;
 use engineering_challenge::auth::Credential;
-use engineering_challenge::kalshi::{parse_dollars_fp, KalshiAdapter};
+use engineering_challenge::kalshi::{KalshiAdapter, parse_dollars_fp};
 use engineering_challenge::orderbook::Orderbook;
+use engineering_challenge::util::AlignedSbeWriter;
+use engineering_challenge::util::dtos::SbeEncode;
 use engineering_challenge::util::dtos::challenge_orderbook::{
     AnyMessage, PriceLevelUpdateDomain, SnapshotAsksEntryDomain, SnapshotBidsEntryDomain,
     SnapshotDomain,
 };
-use engineering_challenge::util::dtos::SbeEncode;
-use engineering_challenge::util::AlignedSbeWriter;
-use engineering_challenge::Side;
 
 const BENCH_PEM: &str = "-----BEGIN PRIVATE KEY-----\n\
 MC4CAQAwBQYDK2VwBCIEIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n\
@@ -336,7 +336,11 @@ fn test_benchmark_delta_burst_workload_invariants() {
             } else {
                 500_000 + idx * 1_000
             };
-            let delta_qty = if (next_rng() % 2) == 0 { 500_000 } else { -500_000 };
+            let delta_qty = if (next_rng() % 2) == 0 {
+                500_000
+            } else {
+                -500_000
+            };
             operations.push((side, price, delta_qty, current_clock));
         } else if roll < 75 {
             let offset = (101 + (next_rng() % 200)) as i64;
@@ -372,22 +376,12 @@ fn test_benchmark_delta_burst_workload_invariants() {
 
     // Invariant 2: All remaining bid quantities must be strictly positive
     for (&price, &qty) in &book.bids {
-        assert!(
-            qty > 0,
-            "Bid price {} had invalid quantity {}",
-            price,
-            qty
-        );
+        assert!(qty > 0, "Bid price {} had invalid quantity {}", price, qty);
     }
 
     // Invariant 3: All remaining ask quantities must be strictly positive
     for (&price, &qty) in &book.asks {
-        assert!(
-            qty > 0,
-            "Ask price {} had invalid quantity {}",
-            price,
-            qty
-        );
+        assert!(qty > 0, "Ask price {} had invalid quantity {}", price, qty);
     }
 
     // Invariant 4: Best bid < Best ask (no inverted market cross from synthetic workload)

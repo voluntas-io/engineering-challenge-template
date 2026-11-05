@@ -3,21 +3,19 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use criterion::{
-    criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
+use engineering_challenge::Side;
 use engineering_challenge::adapter::ExchangeAdapter;
 use engineering_challenge::auth::Credential;
-use engineering_challenge::kalshi::{parse_dollars_fp, KalshiAdapter};
+use engineering_challenge::kalshi::{KalshiAdapter, parse_dollars_fp};
 use engineering_challenge::orderbook::Orderbook;
+use engineering_challenge::util::AlignedSbeWriter;
+use engineering_challenge::util::dtos::SbeEncode;
 use engineering_challenge::util::dtos::challenge_orderbook::{
     AnyMessage, PriceLevelUpdateDomain, SnapshotAsksEntryDomain, SnapshotBidsEntryDomain,
     SnapshotDomain,
 };
-use engineering_challenge::util::dtos::SbeEncode;
-use engineering_challenge::util::AlignedSbeWriter;
-use engineering_challenge::Side;
 
 const CHUNK_SIZE_64_MIB: usize = 64 << 20;
 
@@ -96,7 +94,13 @@ fn bench_orderbook(c: &mut Criterion) {
             .collect();
 
         b.iter_batched(
-            || (base_book.bids.clone(), base_book.asks.clone(), base_book.clock),
+            || {
+                (
+                    base_book.bids.clone(),
+                    base_book.asks.clone(),
+                    base_book.clock,
+                )
+            },
             |(bids, asks, clock)| {
                 let mut book = Orderbook { bids, asks, clock };
                 for &(side, price, delta_qty, clock) in &updates {
@@ -130,7 +134,13 @@ fn bench_orderbook(c: &mut Criterion) {
             .collect();
 
         b.iter_batched(
-            || (base_book.bids.clone(), base_book.asks.clone(), base_book.clock),
+            || {
+                (
+                    base_book.bids.clone(),
+                    base_book.asks.clone(),
+                    base_book.clock,
+                )
+            },
             |(bids, asks, clock)| {
                 let mut book = Orderbook { bids, asks, clock };
                 for &(side, price, delta_qty, clock) in &deletes {
@@ -178,7 +188,11 @@ fn bench_orderbook(c: &mut Criterion) {
                 } else {
                     500_000 + idx * 1_000
                 };
-                let delta_qty = if (next_rng() % 2) == 0 { 500_000 } else { -500_000 };
+                let delta_qty = if (next_rng() % 2) == 0 {
+                    500_000
+                } else {
+                    -500_000
+                };
                 operations.push((side, price, delta_qty, current_clock));
             } else if roll < 75 {
                 // 25% Insert new level
@@ -202,7 +216,13 @@ fn bench_orderbook(c: &mut Criterion) {
         }
 
         b.iter_batched(
-            || (base_book.bids.clone(), base_book.asks.clone(), base_book.clock),
+            || {
+                (
+                    base_book.bids.clone(),
+                    base_book.asks.clone(),
+                    base_book.clock,
+                )
+            },
             |(bids, asks, clock)| {
                 let mut book = Orderbook { bids, asks, clock };
                 for &(side, price, delta_qty, clock) in &operations {
@@ -261,51 +281,43 @@ fn bench_snapshots(c: &mut Criterion) {
         }
 
         group.throughput(Throughput::Elements((depth * 2) as u64));
-        group.bench_with_input(
-            BenchmarkId::new("extraction", depth),
-            &depth,
-            |b, _| {
-                b.iter(|| {
-                    let bids = book.bids_snapshot();
-                    let asks = book.asks_snapshot();
-                    black_box((bids, asks))
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("extraction", depth), &depth, |b, _| {
+            b.iter(|| {
+                let bids = book.bids_snapshot();
+                let asks = book.asks_snapshot();
+                black_box((bids, asks))
+            });
+        });
 
         // Also benchmark DTO creation (converting PriceLevel to SnapshotDomain DTOs)
-        group.bench_with_input(
-            BenchmarkId::new("dto_generation", depth),
-            &depth,
-            |b, _| {
-                b.iter(|| {
-                    let bids: Vec<SnapshotBidsEntryDomain> = book
-                        .bids
-                        .iter()
-                        .map(|(&price_level, &quantity)| SnapshotBidsEntryDomain {
-                            price_level,
-                            quantity,
-                        })
-                        .collect();
-                    let asks: Vec<SnapshotAsksEntryDomain> = book
-                        .asks
-                        .iter()
-                        .map(|(&price_level, &quantity)| SnapshotAsksEntryDomain {
-                            price_level,
-                            quantity,
-                        })
-                        .collect();
-                    let snap = SnapshotDomain {
-                        symbol: "KXFED-24DEC-T5.00".to_owned(),
-                        received_at: bench_time(),
-                        exchange_timestamp: bench_time(),
-                        bids,
-                        asks,
-                    };
-                    black_box(snap)
-                });
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("dto_generation", depth), &depth, |b, _| {
+            b.iter(|| {
+                let bids: Vec<SnapshotBidsEntryDomain> = book
+                    .bids
+                    .iter()
+                    .map(|(&price_level, &quantity)| SnapshotBidsEntryDomain {
+                        price_level,
+                        quantity,
+                    })
+                    .collect();
+                let asks: Vec<SnapshotAsksEntryDomain> = book
+                    .asks
+                    .iter()
+                    .map(|(&price_level, &quantity)| SnapshotAsksEntryDomain {
+                        price_level,
+                        quantity,
+                    })
+                    .collect();
+                let snap = SnapshotDomain {
+                    symbol: "KXFED-24DEC-T5.00".to_owned(),
+                    received_at: bench_time(),
+                    exchange_timestamp: bench_time(),
+                    bids,
+                    asks,
+                };
+                black_box(snap)
+            });
+        });
     }
 
     group.finish();
@@ -454,13 +466,9 @@ fn bench_parsing(c: &mut Criterion) {
     ];
 
     for &s in &test_strings {
-        group.bench_with_input(
-            BenchmarkId::new("dollars_fixed_point", s),
-            s,
-            |b, s| {
-                b.iter(|| black_box(parse_dollars_fp(s)));
-            },
-        );
+        group.bench_with_input(BenchmarkId::new("dollars_fixed_point", s), s, |b, s| {
+            b.iter(|| black_box(parse_dollars_fp(s)));
+        });
     }
 
     // 4.2 Raw JSON WebSocket delta wire parsing
@@ -502,4 +510,3 @@ criterion_group! {
 }
 
 criterion_main!(benches);
-

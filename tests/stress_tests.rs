@@ -12,21 +12,21 @@
 //! Every test is wrapped in a strict timeout (`tokio::time::timeout(5s)`)
 //! ensuring bounded, deadlock-free execution.
 
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use futures_util::{SinkExt, StreamExt};
 use tokio::io::DuplexStream;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::{Mutex, oneshot};
 use tokio_tungstenite::tungstenite::Message;
 
 use engineering_challenge::Side;
 use engineering_challenge::collector::Collector;
 use engineering_challenge::kalshi;
 use engineering_challenge::mock::{
-    register_mock_connector, register_mock_rest_hook, unregister_mock_connector,
-    unregister_mock_rest_hook, LoopbackMockAdapter, MockStreamConnector,
+    LoopbackMockAdapter, MockStreamConnector, register_mock_connector, register_mock_rest_hook,
+    unregister_mock_connector, unregister_mock_rest_hook,
 };
 use engineering_challenge::orderbook::Orderbook;
 use engineering_challenge::util::dtos::challenge_orderbook::AnyMessage;
@@ -710,7 +710,10 @@ async fn test_stress_scenario_4_midstream_packet_loss_and_shadow_failover() {
     })
     .await;
 
-    assert!(res.is_ok(), "Test timed out: mid-stream failover deadlocked");
+    assert!(
+        res.is_ok(),
+        "Test timed out: mid-stream failover deadlocked"
+    );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -728,10 +731,7 @@ async fn test_stress_scenario_5_out_of_order_and_dropped_messages() {
         let rest_server = MockRestServer::start(200).await;
         let rest_url = rest_server.url();
 
-        let _env = EnvGuard::new(&[
-            ("OUTPUT_PATH", &tmp_path),
-            ("KALSHI_REST_URL", &rest_url),
-        ]);
+        let _env = EnvGuard::new(&[("OUTPUT_PATH", &tmp_path), ("KALSHI_REST_URL", &rest_url)]);
 
         let ws_server = MockWsServer::start(move |ws, _idx| async move {
             let (mut write, mut read) = ws.split();

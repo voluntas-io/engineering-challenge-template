@@ -3,8 +3,8 @@
 //! Abstracts the wire protocol (URL, authentication headers, subscription encoding,
 //! message decoding) so the collector engine remains completely exchange-agnostic.
 
-use anyhow::Result;
 use crate::Side;
+use anyhow::Result;
 
 /// Canonical inbound message after exchange-specific JSON is decoded.
 #[derive(Debug)]
@@ -30,10 +30,7 @@ pub enum InboundMessage {
         exchange_ts_ms: Option<i64>,
     },
     /// Exchange error notification.
-    Error {
-        code: Option<i64>,
-        message: String,
-    },
+    Error { code: Option<i64>, message: String },
 }
 
 /// Generic interface implemented by each exchange (Kalshi, Polymarket, Mock).
