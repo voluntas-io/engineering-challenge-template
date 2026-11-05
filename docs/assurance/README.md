@@ -33,6 +33,7 @@ The framework is additive. Historical verification records, commit messages, fix
 | [`../verification-2026-11-05-jh4-short-writes.md`](../verification-2026-11-05-jh4-short-writes.md) | JH-4 short and partial-write evidence |
 | [`../verification-2026-11-05-jh4-flush-sync.md`](../verification-2026-11-05-jh4-flush-sync.md) | JH-4 flush and sync failure evidence |
 | [`../verification-2026-11-05-jh4-recovery.md`](../verification-2026-11-05-jh4-recovery.md) | JH-4 recovery, crash and metadata failure evidence |
+| [`../verification-2026-11-05-jh4-enospc-report.md`](../verification-2026-11-05-jh4-enospc-report.md) | JH-4 directory failure, ENOSPC and report agreement evidence |
 | [`reports/english-audit-2026-11-05-main-3da31e8.json`](reports/english-audit-2026-11-05-main-3da31e8.json) | Machine-readable baseline audit |
 | [`reports/project-language-audit-2026-11-02.json`](reports/project-language-audit-2026-11-02.json) | Historical machine-readable remote audit metadata |
 | [`ci/quality-gate.proposed.yml`](ci/quality-gate.proposed.yml) | Proposed non-blocking CI job; not installed |

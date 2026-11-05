@@ -145,6 +145,12 @@ pub struct RunReport {
     /// Final raw-frame journal state. Present when the journal was enabled.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub journal: Option<crate::journal::JournalStatus>,
+    /// Independent read-back of the journal manifest and finalized segments.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub journal_verification: Option<crate::journal::JournalVerification>,
+    /// Error produced when report status and persisted journal state disagree.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub journal_consistency_error: Option<String>,
 }
 
 impl RunReport {
@@ -193,6 +199,8 @@ impl RunReport {
             coverage: None,
             output_manifest: None,
             journal: None,
+            journal_verification: None,
+            journal_consistency_error: None,
         }
     }
 

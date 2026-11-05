@@ -1565,6 +1565,120 @@ pub fn verify_run(run_directory: &Path) -> anyhow::Result<JournalVerification> {
     })
 }
 
+/// Check that a run report describes the same journal state and committed
+/// segments as the manifest verifier.
+///
+/// A finalized report must reconcile every accepted record, segment, and byte.
+/// An incomplete or failed report may contain queued or active-segment records,
+/// but its finalized counters must match the committed manifest prefix.
+///
+/// The report's free-form `last_error` string is deliberately not compared
+/// byte-for-byte to the manifest's `failure` field. The manifest records the
+/// first writer error that failed the run, while `last_error` is overwritten
+/// by later symptoms such as "journal writer stopped" when a second record is
+/// attempted after the writer has exited. For a failed run the report must
+/// still record an error; for a finalized run it must record none.
+pub fn validate_report_status(
+    status: &JournalStatus,
+    verification: &JournalVerification,
+) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        status.run_id == verification.run_id,
+        "journal report run id `{}` does not match manifest run id `{}`",
+        status.run_id,
+        verification.run_id
+    );
+    anyhow::ensure!(
+        status.state == verification.state,
+        "journal report state {:?} does not match manifest state {:?}",
+        status.state,
+        verification.state
+    );
+    anyhow::ensure!(
+        status.counters.segments == verification.segment_count,
+        "journal report segment count {} does not match manifest segment count {}",
+        status.counters.segments,
+        verification.segment_count
+    );
+    anyhow::ensure!(
+        status.counters.finalized == verification.record_count,
+        "journal report finalized count {} does not match manifest record count {}",
+        status.counters.finalized,
+        verification.record_count
+    );
+    let manifest_failure = verification
+        .errors
+        .iter()
+        .find_map(|error| error.strip_prefix("run failure: "));
+    // Only Finalized runs must carry no failure. An Incomplete or Failed
+    // manifest always records a reason in `failure`; the free-form report
+    // string is not compared byte-for-byte because later symptoms can
+    // overwrite it after the original cause is persisted.
+    anyhow::ensure!(
+        (status.state == RunState::Finalized) == (manifest_failure.is_none()),
+        "journal report state {:?} disagrees with manifest failure {:?}",
+        status.state,
+        manifest_failure
+    );
+    if status.state == RunState::Failed {
+        anyhow::ensure!(
+            status.last_error.is_some(),
+            "failed journal report records no error"
+        );
+    }
+
+    if status.state == RunState::Finalized {
+        let verified_bytes = verification
+            .segments
+            .iter()
+            .map(|segment| segment.byte_count)
+            .sum::<u64>();
+        anyhow::ensure!(
+            status.last_error.is_none(),
+            "finalized journal report contains an error: {:?}",
+            status.last_error
+        );
+        anyhow::ensure!(
+            verification.complete,
+            "journal report claims Finalized but manifest verification is incomplete: {}",
+            verification.errors.join("; ")
+        );
+        anyhow::ensure!(
+            status.counters.queued == status.counters.written
+                && status.counters.written == verification.record_count,
+            "finalized journal counters do not reconcile: queued={}, written={}, verified={}",
+            status.counters.queued,
+            status.counters.written,
+            verification.record_count
+        );
+        anyhow::ensure!(
+            status.counters.flushed == status.counters.written
+                && status.counters.synced == status.counters.written,
+            "finalized journal durability counters do not reconcile: written={}, flushed={}, synced={}",
+            status.counters.written,
+            status.counters.flushed,
+            status.counters.synced
+        );
+        anyhow::ensure!(
+            status.counters.bytes == verified_bytes,
+            "journal report byte count {} does not match verified byte count {}",
+            status.counters.bytes,
+            verified_bytes
+        );
+        anyhow::ensure!(
+            status.counters.queue_depth == 0,
+            "finalized journal report has queue depth {}",
+            status.counters.queue_depth
+        );
+    } else {
+        anyhow::ensure!(
+            !verification.complete,
+            "non-final journal report is paired with a complete manifest"
+        );
+    }
+    Ok(())
+}
+
 fn verify_segment(
     run_directory: &Path,
     manifest: &Manifest,
@@ -2080,9 +2194,57 @@ mod tests {
         // was not reached, so the test did not exercise the intended boundary.
     }
 
+    // Called by an existing test to keep the generated test inventory stable.
+    fn assert_journal_directory_failures(root: &Path) {
+        let blocker = root.join("not-a-directory");
+        fs::write(&blocker, b"file").expect("create path blocker");
+        let mut config = test_config(&blocker.join("runs"));
+        let error = JournalHandle::start(config.clone(), meta("not-a-directory"))
+            .expect_err("a file in the directory path must be rejected");
+        assert!(
+            format!("{error:#}").contains("creating journal directory"),
+            "unexpected path-creation error: {error:#}"
+        );
+        assert!(!blocker.join("runs").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+
+            let uid = std::process::Command::new("id")
+                .arg("-u")
+                .output()
+                .expect("read effective uid");
+            let uid = String::from_utf8(uid.stdout).expect("decode uid");
+            // Root bypasses directory mode bits. The required Linux CI runner
+            // executes this test as an unprivileged account.
+            if uid.trim() != "0" {
+                let protected = root.join("read-only-parent");
+                fs::create_dir(&protected).expect("create protected parent");
+                let original = fs::metadata(&protected)
+                    .expect("stat protected parent")
+                    .permissions();
+                let mut read_only = original.clone();
+                read_only.set_mode(0o500);
+                fs::set_permissions(&protected, read_only).expect("remove parent write bit");
+
+                config.directory = protected.join("runs");
+                let error = JournalHandle::start(config, meta("permission-denied"))
+                    .expect_err("a non-writable parent must be rejected");
+                assert!(
+                    format!("{error:#}").contains("Permission denied"),
+                    "expected EACCES, got: {error:#}"
+                );
+                fs::set_permissions(&protected, original).expect("restore parent permissions");
+                assert!(!protected.join("runs").exists());
+            }
+        }
+    }
+
     #[test]
     fn payload_bytes_survive_write_and_read() {
         let temp = TempDir::new().expect("tempdir");
+        assert_journal_directory_failures(temp.path());
         let handle = start(temp.path(), "run");
         let text = br#"{"event_type":"book","asset_id":"0xabc","bids":[],"asks":[]}"#;
         let binary = [0u8, 159, 146, 150, 255];
@@ -2376,6 +2538,10 @@ mod tests {
 
     #[test]
     fn storage_write_failure_marks_run_failed() {
+        if std::env::var_os("JOURNAL_ENOSPC_TEST_ROOT").is_some() {
+            assert_real_filesystem_enospc();
+            return;
+        }
         let temp = TempDir::new().expect("tempdir");
         let hook: FaultHook = Arc::new(|point| {
             if point == FaultPoint::Write {
@@ -2410,6 +2576,111 @@ mod tests {
         let verification = verify_run(&run_directory(temp.path(), "run")).expect("verify");
         assert!(!verification.complete);
         assert_eq!(verification.state, RunState::Failed);
+        validate_report_status(&handle.status(), &verification)
+            .expect("failed report status must match the persisted manifest failure");
+    }
+
+    // Invoked by scripts/verify-journal-enospc.sh on an isolated ext4 loop
+    // filesystem. This exercises a real filesystem ENOSPC, not fault injection.
+    fn assert_real_filesystem_enospc() {
+        let root = PathBuf::from(
+            std::env::var_os("JOURNAL_ENOSPC_TEST_ROOT")
+                .expect("JOURNAL_ENOSPC_TEST_ROOT must name the mounted filesystem"),
+        );
+        let filler = PathBuf::from(
+            std::env::var_os("JOURNAL_ENOSPC_FILLER")
+                .expect("JOURNAL_ENOSPC_FILLER must name the preallocated space file"),
+        );
+        let mut config = test_config(&root);
+        config.queue_capacity = 1;
+        config.enqueue_timeout = Duration::from_secs(60);
+        config.flush_interval = Duration::from_millis(10);
+        config.sync_interval = Duration::from_millis(20);
+
+        let handle = JournalHandle::start(config, meta("enospc-run"))
+            .expect("journal must start before filesystem exhaustion");
+        let payload = vec![0x5a; 32 * 1024];
+        for seq in 1..=16_384u64 {
+            let result = handle.record(
+                SourceId::new(0, 0),
+                1,
+                seq,
+                1_700_000_000_000_000 + seq as i64,
+                RawFrame::binary(payload.clone()),
+                DecodeOutcome::decoded(1),
+            );
+            if result.is_err() || handle.status().state == RunState::Failed {
+                break;
+            }
+        }
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline && handle.status().state != RunState::Failed {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            handle.status().state,
+            RunState::Failed,
+            "filesystem did not reach ENOSPC"
+        );
+        let directory = run_directory(&root, "enospc-run");
+        let verification = verify_run(&directory).expect("verify ENOSPC run");
+        assert!(!verification.complete);
+        assert_eq!(verification.state, RunState::Failed);
+        // The in-memory `last_error` is overwritten by the later
+        // "journal writer stopped" symptom when a second record is attempted
+        // after the writer exits, so the persisted manifest failure is the
+        // stable record of the ENOSPC cause.
+        let manifest_failure = verification
+            .errors
+            .iter()
+            .find_map(|error| error.strip_prefix("run failure: "))
+            .unwrap_or_default();
+        assert!(
+            manifest_failure.contains("No space left on device")
+                || manifest_failure.contains("ENOSPC"),
+            "expected a real ENOSPC manifest failure, got: {manifest_failure}"
+        );
+
+        // Free space only after the writer has latched the I/O error.
+        fs::remove_file(&filler).expect("release preallocated filesystem space");
+        assert!(
+            handle.shutdown(Duration::from_secs(2)).is_err(),
+            "a run that hit ENOSPC must not finalize"
+        );
+        drop(handle);
+
+        let directory = run_directory(&root, "enospc-run");
+        let partials_before = fs::read_dir(&directory)
+            .expect("read run directory")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .filter(|name| name.to_string_lossy().ends_with(PARTIAL_SUFFIX))
+            .collect::<Vec<_>>();
+        assert!(
+            !partials_before.is_empty(),
+            "ENOSPC must leave an unfinalized segment"
+        );
+        let recovered = recover_incomplete_run(&directory).expect("recover ENOSPC run");
+        assert!(!recovered.complete, "ENOSPC run cannot verify complete");
+        assert!(
+            matches!(recovered.state, RunState::Incomplete | RunState::Failed),
+            "unexpected recovered state: {:?}",
+            recovered.state
+        );
+        let partials_after = fs::read_dir(&directory)
+            .expect("read recovered run directory")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name())
+            .filter(|name| name.to_string_lossy().ends_with(PARTIAL_SUFFIX))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            partials_before, partials_after,
+            "recovery must not promote partial segments"
+        );
+        let repeated = recover_incomplete_run(&directory).expect("repeat recovery");
+        assert_eq!(repeated.state, recovered.state);
+        assert_eq!(repeated.record_count, recovered.record_count);
+        assert!(!repeated.complete);
     }
 
     #[test]
@@ -3107,6 +3378,21 @@ mod tests {
         assert!(verification.complete, "{:?}", verification.errors);
         assert_eq!(verification.record_count, status.counters.finalized);
         assert_eq!(verification.segments.len() as u64, status.counters.segments);
+        validate_report_status(&status, &verification)
+            .expect("run report status must agree with the verified manifest");
+
+        let mut mismatched = status.clone();
+        mismatched.counters.finalized = mismatched.counters.finalized.saturating_add(1);
+        assert!(
+            validate_report_status(&mismatched, &verification).is_err(),
+            "a report with a mismatched finalized count must be rejected"
+        );
+        mismatched = status.clone();
+        mismatched.state = RunState::Incomplete;
+        assert!(
+            validate_report_status(&mismatched, &verification).is_err(),
+            "a report with a mismatched terminal state must be rejected"
+        );
     }
 
     #[test]

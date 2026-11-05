@@ -716,6 +716,28 @@ where
         }
         None => None,
     };
+    let mut journal_consistency_error = None;
+    let journal_verification = journal_status.as_ref().and_then(|status| {
+        match crate::journal::verify_run(std::path::Path::new(&status.run_directory)) {
+            Ok(mut verification) => {
+                if let Err(error) = crate::journal::validate_report_status(status, &verification) {
+                    let message = format!("{error:#}");
+                    verification.complete = false;
+                    verification
+                        .errors
+                        .push(format!("journal report/manifest mismatch: {message}"));
+                    journal_consistency_error = Some(message);
+                    shutdown_error.get_or_insert(error);
+                }
+                Some(verification)
+            }
+            Err(error) => {
+                journal_consistency_error = Some(format!("{error:#}"));
+                shutdown_error.get_or_insert(error);
+                None
+            }
+        }
+    });
     stop_metrics(metrics_shutdown, metrics_handle).await;
     let core_stats = core.stats();
     let sources: Vec<_> = core.statuses().values().cloned().collect();
@@ -741,6 +763,8 @@ where
     report.catalog = Some(bootstrap.catalog);
     report.coverage = Some(final_coverage);
     report.journal = journal_status;
+    report.journal_verification = journal_verification;
+    report.journal_consistency_error = journal_consistency_error;
 
     // The final snapshot is persisted through the same latest-wins worker as
     // every intermediate one, then the worker is drained and joined. A warm

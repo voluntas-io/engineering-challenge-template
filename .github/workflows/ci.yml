@@ -43,6 +43,9 @@ jobs:
       - name: Test
         run: cargo test --all-targets --locked
 
+      - name: Test journal on an isolated ext4 filesystem (ENOSPC)
+        run: scripts/verify-journal-enospc.sh
+
       - name: Documentation tests
         run: cargo test --doc --locked
 
