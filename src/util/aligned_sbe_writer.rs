@@ -45,7 +45,7 @@ impl AlignedSbeWriter {
         let len = message.encoded_length_with_header()?;
         let payload_limit = self.chunk - HEADER_LENGTH;
         anyhow::ensure!(len <= payload_limit, "SBE message does not fit in a chunk");
-        if len > payload_limit - self.buf.len() {
+        if self.buf.len() + len > payload_limit {
             self.flush()?;
         }
 
@@ -68,8 +68,48 @@ impl AlignedSbeWriter {
     pub fn flush(&mut self) -> anyhow::Result<()> {
         if !self.buf.is_empty() {
             self.buf.resize(self.chunk, 0);
-            self.file.write_all(&self.buf)?;
+            let write_res = self.file.write_all(&self.buf);
             self.buf.clear();
+            write_res?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FailingMessage(bool);
+
+    impl SbeEncode for FailingMessage {
+        fn encoded_length_with_header(&self) -> anyhow::Result<usize> {
+            Ok(8)
+        }
+
+        fn encode(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
+            // Safe encoders may read their buffer before writing it.
+            assert!(buf.iter().all(|byte| *byte == 0));
+            buf.fill(42);
+            if self.0 {
+                anyhow::bail!("encoding failed");
+            }
+            Ok(7)
+        }
+    }
+
+    #[test]
+    fn failed_or_short_encoding_preserves_prior_messages() -> anyhow::Result<()> {
+        for fail in [false, true] {
+            let file = tempfile::NamedTempFile::new()?;
+            let mut writer = AlignedSbeWriter::create(file.path(), 32)?;
+            writer.buf.extend_from_slice(&[1, 2, 3]);
+            assert!(writer.write_msg(&FailingMessage(fail)).is_err());
+            assert_eq!(writer.buf, [1, 2, 3]);
+            writer.flush()?;
+            let bytes = std::fs::read(file.path())?;
+            assert_eq!(&bytes[..3], &[1, 2, 3]);
+            assert!(bytes[3..].iter().all(|byte| *byte == 0));
         }
         Ok(())
     }

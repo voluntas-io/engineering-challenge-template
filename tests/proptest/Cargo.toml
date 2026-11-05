@@ -1,0 +1,12 @@
+[package]
+name = "proptest"
+version = "1.6.0"
+edition = "2024"
+description = "Property testing framework for Rust, offline compatible"
+
+[dependencies]
+
+[features]
+default = []
+std = []
+alloc = []
