@@ -10,7 +10,7 @@ Output is emitted as SBE-encoded binary messages (snapshots + deltas) to stdout.
 |---------|-------------|
 | **Base challenge** | Live orderbook collection for all Kalshi markets |
 | **Extension 1** | Redundant WebSockets per bucket; automatic failover with snapshot re-emission |
-| **Extension 2** | Per-symbol idle detection + resubscription; periodic full socket reconnect |
+| **Extension 2** | Per-symbol idle detection + snapshot resync; `seq` gap detection; periodic full socket reconnect |
 | **Extension 3** | Generic `ExchangeAdapter` trait; Kalshi is a pluggable adapter |
 | **Extension 4** | Latency research documented in [LATENCY.md](LATENCY.md) |
 
@@ -47,17 +47,22 @@ conventional two-sided book:
 `1_000_000 = $1.00` or `1 share`. This avoids floating-point rounding and
 matches the SBE schema.
 
-**Failover** (Extension 1): On primary socket disconnect, the collector:
+**Failover** (Extension 1): When the primary socket disconnects or is recycled, the collector:
 1. Promotes the shadow socket to primary.
 2. Emits a snapshot from the current in-memory book state (for output continuity).
-3. Requests a fresh `get_snapshot` on the new primary to resynchronise.
-4. Respawns a new shadow socket.
+3. Holds back that bucket's deltas and requests a fresh `get_snapshot` on the new primary.
+4. Replaces each book when its snapshot arrives, then resumes deltas.
+5. Respawns the replaced socket.
 
-This is a redundancy and recovery mechanism, not a zero-message-loss guarantee.
-Shadow updates are ignored until promotion; recovery depends on receiving a fresh
-snapshot. Updates with clocks older than the current book are rejected before
-state mutation and SBE output. Equal clocks remain accepted; this is not a
-guarantee of duplicate suppression or ordering across independent connections.
+This is a redundancy and recovery mechanism, not a zero-message-loss guarantee:
+changes during the swap reach the output through the fresh snapshot, not as
+individual updates. Shadow updates are ignored until promotion.
+
+**Sequence and clock checks**: `seq` is checked per subscription on each connection.
+A gap on the primary triggers the same hold-and-snapshot recovery. Deltas with a clock
+older than the book are rejected before state mutation and SBE output, and request a
+snapshot. A snapshot from the primary always replaces the book, because Kalshi documents
+that a market's clock can decrease during maintenance.
 
 The SBE writer encodes into initialized buffer memory using safe Rust. Startup
 still uses `unsafe` environment-variable initialization, before creating the Tokio
@@ -65,8 +70,9 @@ runtime. Do not describe the entire implementation as 100% safe Rust.
 
 **Subscription monitoring** (Extension 2):
 - Every 30 s, check each market's last-update timestamp.
-- If a market hasn't received any update in 90 s, it is unsubscribed and
-  resubscribed (handles silent exchange-side drops).
+- If a market hasn't received any update in 90 s, a fresh snapshot is requested
+  without interrupting its subscription, since quiet markets are often just illiquid.
+- A connection with no frames from the server for 30 s is treated as dead and replaced.
 - Every 10 minutes, each socket is fully replaced with a fresh connection
   (handles cumulative server-side memory leaks / drift).
 
@@ -99,7 +105,7 @@ export KALSHI_PRIVATE_KEY="/path/to/kalshi.key"
 # Optimized release build
 cargo build --release
 
-# Live exchange mode (requires Kalshi API credentials):
+# Live exchange mode (exits with an error if Kalshi API credentials are missing):
 export KALSHI_API_KEY_ID="your-key-uuid-here"
 export KALSHI_PRIVATE_KEY="/path/to/kalshi.key"
 cargo run --release 2>collector.log > orderbook.sbe
@@ -113,17 +119,24 @@ Logs go to stderr; SBE binary data goes to stdout (can be piped or redirected).
 
 Press `Ctrl-C` (SIGINT) for a clean shutdown (closes all WebSockets cleanly and flushes the SBE writer).
 
+The process exits with a non-zero status if the collector stops with an error, such as a failed write to the output. If market discovery fails at startup, it retries with backoff from 1 s to 30 s and does not subscribe until Kalshi returns markets.
+
 ### Run tests
 
 ```bash
-cargo test
+cargo test --all-targets
 ```
+
+This runs 116 tests and all 29 benchmark cases, offline. The property tests and benchmarks use small in-repo harnesses in `tests/proptest` and `benches/criterion`, which mirror the `proptest` and Criterion APIs.
 
 The test suite covers:
 - **End-to-End Pipeline** (`tests/collector_e2e_test.rs`): Runs full `Collector` with streaming synthetic orders, graceful SIGINT shutdown, and verifies SBE decode with `AlignedSbeReader`.
 - **SBE Encoding Round-trip** (`tests/integration_tests.rs`): Validates schema encoding/decoding for snapshots and single/batch deltas.
 - **Orderbook State Machine** (`tests/orderbook_tests.rs`): Ingestion, delta application, monotonic clock validation, level removals, edge cases.
 - **Protocol & Fixed-point Parsing** (`tests/kalshi_parsing_tests.rs`): Fixed-point conversion, cent/sub-cent precision, NO-bid complementation math.
+- **Fault Injection** (`tests/stress_tests.rs`): Silent stalls, reconnect storms, HTTP 429 retry, mid-stream loss, out-of-order clocks, and bounded shutdown over in-process sockets.
+- **Recovery** (unit tests in `src/collector.rs`): Absolute output quantities, `seq` gaps, clock resets, failover, socket recycling, and quiet markets.
+- **Failure Handling** (`tests/silent_socket_tests.rs`, `tests/process_exit_tests.rs`): Silent connections are replaced, and the binary exits on missing credentials or fatal output errors.
 
 ## Output format
 
@@ -146,5 +159,13 @@ Key tuning constants are in [`src/collector.rs`](src/collector.rs):
 | `SOCKETS_PER_BUCKET` | 2 | Redundancy factor |
 | `SNAPSHOT_INTERVAL` | 60 s | Full snapshot emission frequency |
 | `DISCOVERY_INTERVAL` | 30 s | REST poll for new/closed markets |
-| `SYMBOL_IDLE_THRESHOLD` | 90 s | Idle timeout before resubscription |
+| `SYMBOL_IDLE_THRESHOLD` | 90 s | Idle timeout before requesting a snapshot |
 | `SOCKET_RECONNECT_INTERVAL` | 600 s | Full socket recycle period |
+| `SNAPSHOT_REQUEST_COOLDOWN` | 5 s | Minimum time between snapshot requests per market |
+
+Two environment variables tune connection health checks:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WS_READ_TIMEOUT_MS` | 30000 | Replace a connection after this long with no frames from the server |
+| `WS_PING_INTERVAL_MS` | 15000 | Keepalive ping interval |

@@ -43,15 +43,16 @@ paths supply a local timestamp as `exchange_timestamp`.
 ## What redundancy provides today
 
 I maintain a primary and a subscribed shadow connection for each bucket. Only
-primary events update the canonical book and output. On primary disconnection,
-I promote the other socket, request a fresh snapshot when its subscription ID
-is available, emit the current in-memory book, and replace the failed socket.
+primary events update the canonical book and output. When a primary disconnects
+or is recycled, I promote the other socket, emit the current in-memory book, hold
+back that bucket's deltas until a fresh snapshot replaces each book, and replace
+the old socket.
 
 This avoids requiring a new connection handshake before promotion, but it does
 not guarantee a healthy backup, immediate resynchronization, or lossless
 failover. My collector does not select the fastest socket or race both feeds.
-Older clocks are rejected before state mutation and SBE output; equal clocks
-may still pass. That is not complete duplicate or sequence-gap detection.
+Older clocks are rejected before state mutation and SBE output. I check `seq` on
+each connection, and a gap on the primary triggers the same snapshot recovery.
 
 ## What I would measure next
 
