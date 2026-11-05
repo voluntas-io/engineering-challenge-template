@@ -28,6 +28,7 @@
 //!   2. `orderbook_delta`    — incremental price-level changes
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
@@ -35,7 +36,7 @@ use tracing::{debug, warn};
 
 use crate::Side;
 
-use crate::adapter::{ExchangeAdapter, InboundMessage};
+use crate::adapter::{DecodedFrame, ExchangeAdapter, InboundMessage, SequencePoint};
 use crate::auth::Credential;
 
 // ── REST base URL ─────────────────────────────────────────────────────────────
@@ -100,73 +101,105 @@ impl ExchangeAdapter for KalshiAdapter {
     }
 
     fn decode_message(&self, text: &str) -> Result<Option<InboundMessage>> {
+        Ok(self.decode_frame(text)?.message)
+    }
+
+    fn decode_frame(&self, text: &str) -> Result<DecodedFrame> {
         let env: WsEnvelope = match serde_json::from_str(text) {
             Ok(env) => env,
             Err(e) => {
                 debug!("Kalshi WS parse error: {e} in {text:.200}");
-                return Ok(None);
+                return Ok(DecodedFrame {
+                    message: None,
+                    sequence: None,
+                });
             }
         };
 
-        if env.msg_type == "subscribed" {
-            let sid = env.sid.or_else(|| {
-                env.msg
-                    .as_ref()
-                    .and_then(|m| m.get("sid"))
-                    .and_then(|s| s.as_u64())
-            });
-            if let Some(s) = sid {
-                return Ok(Some(InboundMessage::Subscribed { sid: s }));
-            }
-            return Ok(None);
-        }
-
-        if env.msg_type == "error" {
-            let msg_text = env.error.unwrap_or_else(|| "unknown error".into());
-            return Ok(Some(InboundMessage::Error {
-                code: env.code,
-                message: msg_text,
-            }));
-        }
-
-        let msg_val = match &env.msg {
-            Some(v) => v,
-            None => return Ok(None),
+        let is_book_message = matches!(
+            env.msg_type.as_str(),
+            "orderbook_snapshot" | "orderbook_delta"
+        );
+        let sequence = match (is_book_message, env.sid, env.seq) {
+            (true, Some(sid), Some(seq)) => Some(SequencePoint { sid, seq }),
+            _ => None,
         };
 
-        if env.msg_type == "orderbook_snapshot" {
-            if let Some(snap) = decode_snapshot(msg_val) {
-                let bids = snap.yes_bids;
-                let asks = snap
-                    .no_bids
-                    .iter()
-                    .map(|(p, q)| (1_000_000 - p, *q))
-                    .collect();
-                return Ok(Some(InboundMessage::Snapshot {
-                    ticker: snap.market_ticker,
-                    clock: snap.clock,
-                    bids,
-                    asks,
-                }));
-            }
-        } else if env.msg_type == "orderbook_delta" {
-            if let Some(delta) = decode_delta(msg_val) {
-                let (side, price) = match delta.side {
-                    DeltaSide::Yes => (Side::Buy, delta.price),
-                    DeltaSide::No => (Side::Sell, 1_000_000 - delta.price),
-                };
-                return Ok(Some(InboundMessage::Delta {
-                    ticker: delta.market_ticker,
-                    clock: delta.clock,
-                    price,
-                    qty_delta: delta.delta,
-                    side,
-                    exchange_ts_ms: delta.ts_ms,
-                }));
-            }
-        }
+        Ok(DecodedFrame {
+            message: decode_envelope(env),
+            sequence,
+        })
+    }
+}
 
-        Ok(None)
+/// Convert a parsed Kalshi envelope into the canonical inbound message.
+fn decode_envelope(env: WsEnvelope) -> Option<InboundMessage> {
+    if env.msg_type == "subscribed" {
+        let sid = env.sid.or_else(|| {
+            env.msg
+                .as_ref()
+                .and_then(|m| m.get("sid"))
+                .and_then(|s| s.as_u64())
+        });
+        return sid.map(|sid| InboundMessage::Subscribed { sid });
+    }
+
+    if env.msg_type == "error" {
+        return Some(InboundMessage::Error {
+            code: env.code,
+            message: env.error.unwrap_or_else(|| "unknown error".into()),
+        });
+    }
+
+    let msg_val = env.msg.as_ref()?;
+
+    match env.msg_type.as_str() {
+        "orderbook_snapshot" => {
+            let Some(snap) = decode_snapshot(msg_val) else {
+                warn_malformed("orderbook_snapshot", msg_val);
+                return None;
+            };
+            let asks = snap
+                .no_bids
+                .iter()
+                .map(|(p, q)| (1_000_000 - p, *q))
+                .collect();
+            Some(InboundMessage::Snapshot {
+                ticker: snap.market_ticker,
+                clock: snap.clock,
+                bids: snap.yes_bids,
+                asks,
+            })
+        }
+        "orderbook_delta" => {
+            let Some(delta) = decode_delta(msg_val) else {
+                warn_malformed("orderbook_delta", msg_val);
+                return None;
+            };
+            let (side, price) = match delta.side {
+                DeltaSide::Yes => (Side::Buy, delta.price),
+                DeltaSide::No => (Side::Sell, 1_000_000 - delta.price),
+            };
+            Some(InboundMessage::Delta {
+                ticker: delta.market_ticker,
+                clock: delta.clock,
+                price,
+                qty_delta: delta.delta,
+                side,
+                exchange_ts_ms: delta.ts_ms,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Make dropped book messages visible without flooding the log.
+fn warn_malformed(kind: &str, msg: &serde_json::Value) {
+    static DROPPED: AtomicU64 = AtomicU64::new(0);
+    let dropped = DROPPED.fetch_add(1, Ordering::Relaxed) + 1;
+    if dropped <= 5 || dropped.is_multiple_of(10_000) {
+        let sample: String = msg.to_string().chars().take(200).collect();
+        warn!("Dropped undecodable {kind} message (total {dropped}): {sample}");
     }
 }
 
@@ -483,8 +516,12 @@ pub fn decode_delta(msg: &serde_json::Value) -> Option<RawDelta> {
     let ticker = msg.get("market_ticker")?.as_str()?.to_owned();
     let clock = msg.get("clock")?.as_u64().unwrap_or(0);
     let ts_ms = msg.get("ts_ms").and_then(|v| v.as_i64());
-    let price = parse_dollars_fp(msg.get("price")?.as_str()?)?;
-    let delta = parse_qty_fp(msg.get("delta")?.as_str()?)?;
+    // Kalshi documents `price_dollars` and `delta_fp`. The shorter names stay as
+    // a fallback so a feed that differs from the documentation is still decoded.
+    let price = msg.get("price_dollars").or_else(|| msg.get("price"))?;
+    let price = parse_dollars_fp(price.as_str()?)?;
+    let delta = msg.get("delta_fp").or_else(|| msg.get("delta"))?;
+    let delta = parse_qty_fp(delta.as_str()?)?;
     let side_str = msg.get("side")?.as_str()?;
     let side = match side_str {
         "yes" => DeltaSide::Yes,

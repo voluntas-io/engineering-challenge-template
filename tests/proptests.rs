@@ -192,7 +192,7 @@ proptest! {
         let delta_str = format!("{}.00", delta_units);
 
         let json = format!(
-            r#"{{"type":"orderbook_delta","sid":10,"seq":1,"msg":{{"market_ticker":"{}","clock":{},"price":"{}","delta":"{}","side":"{}","ts_ms":{}}}}}"#,
+            r#"{{"type":"orderbook_delta","sid":10,"seq":1,"msg":{{"market_ticker":"{}","clock":{},"price_dollars":"{}","delta_fp":"{}","side":"{}","ts_ms":{}}}}}"#,
             ticker, clock, price_str, delta_str, side_str, ts_ms
         );
 

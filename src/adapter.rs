@@ -33,6 +33,22 @@ pub enum InboundMessage {
     Error { code: Option<i64>, message: String },
 }
 
+/// Position of a frame in an exchange subscription's message sequence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SequencePoint {
+    /// Subscription the frame belongs to.
+    pub sid: u64,
+    /// Sequence number within that subscription.
+    pub seq: u64,
+}
+
+/// A decoded frame and, when the exchange provides one, its sequence position.
+#[derive(Debug)]
+pub struct DecodedFrame {
+    pub message: Option<InboundMessage>,
+    pub sequence: Option<SequencePoint>,
+}
+
 /// Generic interface implemented by each exchange (Kalshi, Polymarket, Mock).
 pub trait ExchangeAdapter: Send + Sync {
     /// Human-readable exchange name (e.g. "kalshi").
@@ -58,4 +74,14 @@ pub trait ExchangeAdapter: Send + Sync {
 
     /// Decode an incoming raw text message from the WebSocket into canonical format.
     fn decode_message(&self, text: &str) -> Result<Option<InboundMessage>>;
+
+    /// Decode a raw frame with its sequence position.
+    ///
+    /// Exchanges without sequence numbers can rely on this default.
+    fn decode_frame(&self, text: &str) -> Result<DecodedFrame> {
+        Ok(DecodedFrame {
+            message: self.decode_message(text)?,
+            sequence: None,
+        })
+    }
 }

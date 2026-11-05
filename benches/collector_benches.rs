@@ -473,7 +473,7 @@ fn bench_parsing(c: &mut Criterion) {
 
     // 4.2 Raw JSON WebSocket delta wire parsing
     let adapter = create_bench_adapter();
-    let json_delta = r#"{"type":"orderbook_delta","sid":101,"seq":54321,"msg":{"market_ticker":"KXFED-24DEC-T5.00","clock":4096,"ts_ms":1700000000123,"price":"0.4200","delta":"-5.00","side":"yes"}}"#;
+    let json_delta = r#"{"type":"orderbook_delta","sid":101,"seq":54321,"msg":{"market_ticker":"KXFED-24DEC-T5.00","clock":4096,"ts_ms":1700000000123,"price_dollars":"0.4200","delta_fp":"-5.00","side":"yes"}}"#;
 
     group.throughput(Throughput::Bytes(json_delta.len() as u64));
     group.bench_function("kalshi_json_delta", |b| {

@@ -93,6 +93,17 @@ impl Orderbook {
         }
     }
 
+    /// Replace the whole book with an exchange snapshot.
+    ///
+    /// Kalshi delivers a connection's messages in order and documents that a
+    /// market's clock can decrease during maintenance, so a snapshot from the
+    /// active connection is authoritative even when its clock is lower.
+    pub fn replace_from_snapshot(&mut self, bids: &[(i64, i64)], asks: &[(i64, i64)], clock: u64) {
+        self.clock = clock;
+        self.apply_snapshot_side(Side::Buy, bids, clock);
+        self.apply_snapshot_side(Side::Sell, asks, clock);
+    }
+
     /// Apply a delta update to a single price level.
     ///
     /// A delta with `qty == 0` removes the level. Otherwise the quantity is

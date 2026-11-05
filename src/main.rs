@@ -6,20 +6,20 @@
 //!
 //! Implements all challenge requirements and extensions:
 //!   - Extension 1: Redundant WebSockets per bucket with automatic failover
-//!   - Extension 2: Subscription monitoring (idle symbol resubscribe + periodic reconnect)
+//!   - Extension 2: Subscription monitoring (idle symbol resync + periodic reconnect)
 //!   - Extension 3: Generic encode/decode per exchange ([`ExchangeAdapter`])
 //!   - Extension 4: Latency research documented in LATENCY.md
 
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use engineering_challenge::adapter::ExchangeAdapter;
 use engineering_challenge::auth::Credential;
 use engineering_challenge::collector::Collector;
 use engineering_challenge::kalshi::KalshiAdapter;
 use engineering_challenge::mock::MockAdapter;
 use tokio::signal;
-use tracing::{info, warn};
+use tracing::info;
 
 /// Simple .env loader populating missing environment variables before thread spawning.
 fn load_dotenv() {
@@ -72,35 +72,34 @@ async fn run() -> Result<()> {
         info!("Running with MockAdapter (--mock requested)");
         Arc::new(MockAdapter::new())
     } else {
-        match Credential::from_env() {
-            Ok(cred) => {
-                info!("Loaded Kalshi credentials for key ID: {}", cred.key_id);
-                Arc::new(KalshiAdapter::new(Arc::new(cred)))
-            }
-            Err(e) => {
-                warn!("Kalshi credentials not found: {e:#}");
-                warn!(
-                    "Falling back to MockAdapter. Set KALSHI_API_KEY_ID & KALSHI_PRIVATE_KEY for live exchange connection."
-                );
-                Arc::new(MockAdapter::new())
-            }
-        }
+        let cred = Credential::from_env().context(
+            "Kalshi credentials are required for live mode. Set KALSHI_API_KEY_ID and \
+             KALSHI_PRIVATE_KEY, or pass --mock for synthetic data",
+        )?;
+        info!("Loaded Kalshi credentials for key ID: {}", cred.key_id);
+        Arc::new(KalshiAdapter::new(Arc::new(cred)))
     };
 
     let collector = Arc::new(Collector::new(adapter).await?);
     let collector_handle = Arc::clone(&collector);
 
-    let run_handle = tokio::spawn(async move { collector_handle.run().await });
+    let mut run_handle = tokio::spawn(async move { collector_handle.run().await });
 
-    // Block until SIGINT (Ctrl-C)
-    signal::ctrl_c().await?;
-    info!("Received SIGINT – shutting down");
+    // Stop on SIGINT, or as soon as the collector itself stops. A collector that has
+    // failed must not leave a live process behind that writes nothing.
+    tokio::select! {
+        signal = signal::ctrl_c() => {
+            signal?;
+            info!("Received SIGINT – shutting down");
 
-    // Clean shutdown: close sockets and flush SBE writer
-    collector.shutdown();
-
-    if let Err(e) = run_handle.await? {
-        tracing::error!("Collector exited with error: {e:#}");
+            // Clean shutdown: close sockets and flush SBE writer
+            collector.shutdown();
+            run_handle.await.context("collector task failed")??;
+        }
+        result = &mut run_handle => {
+            result.context("collector task failed")??;
+            anyhow::bail!("collector stopped without a shutdown request");
+        }
     }
 
     info!("Shutdown complete");

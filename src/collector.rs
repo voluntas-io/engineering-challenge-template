@@ -2,7 +2,8 @@
 //!
 //! [`Collector`] manages the full lifecycle of the orderbook collection:
 //!
-//! 1. **Bootstrap**: fetch open markets via exchange REST API (or fallback).
+//! 1. **Bootstrap**: fetch open markets via exchange REST API, retrying with
+//!    backoff until the exchange answers.
 //! 2. **WebSocket pool**: maintain `SOCKETS_PER_BUCKET` × `NUM_BUCKETS` sockets,
 //!    with markets load-balanced across buckets.
 //!    - Each bucket has a **primary** socket (the source of truth) and a
@@ -12,10 +13,13 @@
 //! 5. **Snapshot timer**: every 60 s emit a full snapshot for every symbol.
 //! 6. **Market discovery**: every 30 s poll REST for new/closed markets.
 //! 7. **Subscription monitor** (Extension 2):
-//!    - Per-symbol: if no update received for `SYMBOL_IDLE_THRESHOLD`, resubscribe.
+//!    - Per-symbol: if no update received for `SYMBOL_IDLE_THRESHOLD`, request a
+//!      fresh snapshot.
+//!    - Per-connection: a `seq` gap requests fresh snapshots for the whole bucket.
 //!    - Per-socket: periodic full reconnect every `SOCKET_RECONNECT_INTERVAL`.
-//! 8. **Failover** (Extension 1): if the primary socket goes dark, promote the
-//!    redundant socket and emit a snapshot for all affected symbols.
+//! 8. **Failover** (Extension 1): if the primary socket goes dark or is recycled,
+//!    promote the redundant socket, emit the in-memory book, and ignore that
+//!    bucket's deltas until a fresh exchange snapshot replaces each book.
 //! 9. **Generic adapter** (Extension 3): the collector interacts only with
 //!    [`ExchangeAdapter`]. Exchange-specific JSON encoding/decoding is isolated.
 
@@ -36,7 +40,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::Side;
 
-use crate::adapter::{ExchangeAdapter, InboundMessage};
+use crate::adapter::{ExchangeAdapter, InboundMessage, SequencePoint};
 use crate::kalshi;
 use crate::orderbook::Orderbook;
 use crate::output::Output;
@@ -57,11 +61,18 @@ const SNAPSHOT_INTERVAL: Duration = Duration::from_secs(60);
 const DISCOVERY_INTERVAL: Duration = Duration::from_secs(30);
 
 /// A symbol that hasn't sent any update in this window is considered stale.
-/// Trigger an unsubscribe + resubscribe (Extension 2).
+/// Request a fresh snapshot for a market that has been quiet this long (Extension 2).
 const SYMBOL_IDLE_THRESHOLD: Duration = Duration::from_secs(90);
 
 /// Fully reconnect a socket after this interval to clear exchange-side drift (Extension 2).
 const SOCKET_RECONNECT_INTERVAL: Duration = Duration::from_secs(600);
+
+/// Minimum time between snapshot requests for the same market.
+const SNAPSHOT_REQUEST_COOLDOWN: Duration = Duration::from_secs(5);
+
+/// First and maximum delays between attempts at the initial market discovery.
+const INITIAL_DISCOVERY_RETRY: Duration = Duration::from_secs(1);
+const MAX_INITIAL_DISCOVERY_RETRY: Duration = Duration::from_secs(30);
 
 // ── Message sent from a WebSocket task back to the collector ──────────────────
 
@@ -91,6 +102,29 @@ enum WsEvent {
     Disconnected { socket_id: usize },
     /// The subscription on this socket has been assigned a server sid.
     Subscribed { socket_id: usize, sid: u64 },
+    /// This connection skipped at least one message on a subscription.
+    SequenceGap {
+        socket_id: usize,
+        sid: u64,
+        expected: u64,
+        received: u64,
+    },
+}
+
+/// Tracks contiguous `seq` values per subscription on one connection.
+#[derive(Debug, Default)]
+struct SequenceTracker {
+    last_seen: HashMap<u64, u64>,
+}
+
+impl SequenceTracker {
+    /// Record a frame's position. Returns the expected `seq` if this frame skipped ahead
+    /// or repeated an earlier position.
+    fn observe(&mut self, point: SequencePoint) -> Option<u64> {
+        let previous = self.last_seen.insert(point.sid, point.seq)?;
+        let expected = previous.wrapping_add(1);
+        (point.seq != expected).then_some(expected)
+    }
 }
 
 // ── Per-socket control handle ─────────────────────────────────────────────────
@@ -164,21 +198,27 @@ impl Collector {
                 "KXFED-26NOV05".to_string(),
             ]
         } else {
-            match kalshi::fetch_open_markets(&self.http).await {
-                Ok(mkts) if !mkts.is_empty() => {
-                    info!("Discovered {} open markets via REST", mkts.len());
-                    mkts
+            let mut retry = INITIAL_DISCOVERY_RETRY;
+            loop {
+                match kalshi::fetch_open_markets(&self.http).await {
+                    Ok(mkts) if !mkts.is_empty() => {
+                        info!("Discovered {} open markets via REST", mkts.len());
+                        break mkts;
+                    }
+                    Ok(_) => {
+                        warn!("REST market discovery returned no markets; retrying in {retry:?}")
+                    }
+                    Err(e) => warn!("REST market discovery failed: {e:#}; retrying in {retry:?}"),
                 }
-                Ok(_) | Err(_) => {
-                    warn!(
-                        "REST market discovery returned no markets or failed; using seed markets"
-                    );
-                    vec![
-                        "KXBTCD-26NOV05".to_string(),
-                        "KXHIGHNY-26NOV05".to_string(),
-                        "KXFED-26NOV05".to_string(),
-                    ]
+
+                tokio::select! {
+                    _ = self.shutdown_notify.notified() => return Ok(()),
+                    _ = time::sleep(retry) => {}
                 }
+                if self.shutdown.load(Ordering::SeqCst) {
+                    return Ok(());
+                }
+                retry = (retry * 2).min(MAX_INITIAL_DISCOVERY_RETRY);
             }
         };
 
@@ -278,6 +318,8 @@ impl Collector {
                 primary_idx: 0,
                 socket_reconnect_at: Vec::new(),
                 reconnect_attempts: vec![0; SOCKETS_PER_BUCKET],
+                awaiting_snapshot: HashSet::new(),
+                last_snapshot_request: HashMap::new(),
             };
             for socket_role in 0..SOCKETS_PER_BUCKET {
                 let socket = self.spawn_socket(
@@ -354,22 +396,16 @@ impl Collector {
                 if !is_primary(buckets, socket_id) {
                     return Ok(());
                 }
-                // Reject stale snapshots before either state mutation or output.
-                if self
-                    .books
-                    .get(&ticker)
-                    .is_some_and(|book| clock < book.clock)
-                {
-                    return Ok(());
+                if let Some(bidx) = find_bucket_for_socket(buckets, socket_id) {
+                    buckets[bidx].awaiting_snapshot.remove(&ticker);
                 }
                 last_update.insert(ticker.clone(), Instant::now());
 
-                // Apply to in-memory book
-                {
-                    let mut book = self.books.entry(ticker.clone()).or_default();
-                    book.apply_snapshot_side(Side::Buy, &bids, clock);
-                    book.apply_snapshot_side(Side::Sell, &asks, clock);
-                }
+                // A snapshot from the primary replaces the book, even after a clock reset.
+                self.books
+                    .entry(ticker.clone())
+                    .or_default()
+                    .replace_from_snapshot(&bids, &asks, clock);
 
                 // Emit snapshot to SBE output
                 let bids_levels: Vec<_> = bids
@@ -404,15 +440,37 @@ impl Collector {
                     return Ok(());
                 }
 
+                let Some(bidx) = find_bucket_for_socket(buckets, socket_id) else {
+                    return Ok(());
+                };
+                let bucket = &mut buckets[bidx];
+
+                // The coming snapshot replaces this book and includes this change.
+                if bucket.awaiting_snapshot.contains(&ticker) {
+                    return Ok(());
+                }
+
                 // Gate output with the same clock check used by the book.
-                {
+                let previous = {
                     let mut book = self.books.entry(ticker.clone()).or_default();
                     if clock < book.clock {
+                        let book_clock = book.clock;
+                        drop(book);
+                        // One connection delivers in order, so a lower clock means the
+                        // market's clock was reset, as Kalshi documents for maintenance.
+                        if bucket.request_snapshots(vec![ticker.clone()]) > 0 {
+                            warn!(
+                                "Rejected {ticker} delta with clock {clock} below book clock {book_clock}; requested a snapshot"
+                            );
+                        }
                         return Ok(());
                     }
-                    book.apply_delta(side, price, qty_delta, clock);
-                }
+                    book.apply_delta(side, price, qty_delta, clock)
+                };
                 last_update.insert(ticker.clone(), Instant::now());
+
+                // The SBE schema defines this field as the absolute quantity at the level.
+                let quantity = previous.saturating_add(qty_delta).max(0);
 
                 // Emit delta to SBE output
                 let exchange_ts = exchange_ts_ms
@@ -424,9 +482,30 @@ impl Collector {
                     received_at,
                     exchange_ts,
                     price,
-                    qty_delta,
+                    quantity,
                     side,
                 )?;
+            }
+
+            WsEvent::SequenceGap {
+                socket_id,
+                sid,
+                expected,
+                received,
+            } => {
+                if !is_primary(buckets, socket_id) {
+                    debug!("Shadow socket {socket_id} skipped seq {expected}..{received}");
+                    return Ok(());
+                }
+                warn!(
+                    "Primary socket {socket_id} sid {sid} expected seq {expected}, received {received}; resynchronizing bucket"
+                );
+                if let Some(bidx) = find_bucket_for_socket(buckets, socket_id) {
+                    let bucket = &mut buckets[bidx];
+                    let markets: Vec<String> = bucket.markets.iter().cloned().collect();
+                    bucket.awaiting_snapshot.extend(markets.iter().cloned());
+                    bucket.request_snapshots(markets);
+                }
             }
 
             WsEvent::Disconnected { socket_id } => {
@@ -447,27 +526,7 @@ impl Collector {
                         let new_primary = (0..SOCKETS_PER_BUCKET)
                             .find(|&i| i != socket_pos)
                             .unwrap_or(0);
-                        bucket.primary_idx = new_primary;
-
-                        let markets: Vec<String> = bucket.markets.iter().cloned().collect();
-                        if bucket.sockets[new_primary].sid.is_some() {
-                            let _ = bucket.sockets[new_primary]
-                                .cmd_tx
-                                .send(SocketCmd::GetSnapshot(markets.clone()));
-                        }
-
-                        // Emit snapshots from current in-memory book for output continuity
-                        for ticker in &markets {
-                            if let Some(book) = self.books.get(ticker) {
-                                let now = Utc::now();
-                                let b = book.bids_snapshot();
-                                let a = book.asks_snapshot();
-                                drop(book);
-                                self.output
-                                    .lock()
-                                    .write_snapshot(ticker, now, now, &b, &a)?;
-                            }
-                        }
+                        self.promote_primary(bucket, new_primary)?;
                     }
 
                     // Increment reconnect attempts and calculate backoff
@@ -489,6 +548,37 @@ impl Collector {
             }
         }
 
+        Ok(())
+    }
+
+    // ── Failover ──────────────────────────────────────────────────────────────
+
+    /// Make another socket the primary and resynchronize the bucket from it.
+    ///
+    /// The two feeds are not aligned at the moment of the swap: a delta may have been
+    /// ignored on the old shadow and never read from the old primary, or may be seen
+    /// again on the new primary. Deltas are therefore ignored until a fresh snapshot
+    /// from the new primary replaces each book.
+    fn promote_primary(&self, bucket: &mut BucketState, new_primary: usize) -> Result<()> {
+        bucket.primary_idx = new_primary;
+        bucket.last_snapshot_request.clear();
+
+        let markets: Vec<String> = bucket.markets.iter().cloned().collect();
+        bucket.awaiting_snapshot.extend(markets.iter().cloned());
+        bucket.request_snapshots(markets.clone());
+
+        // Emit snapshots from current in-memory book for output continuity
+        for ticker in &markets {
+            if let Some(book) = self.books.get(ticker) {
+                let now = Utc::now();
+                let b = book.bids_snapshot();
+                let a = book.asks_snapshot();
+                drop(book);
+                self.output
+                    .lock()
+                    .write_snapshot(ticker, now, now, &b, &a)?;
+            }
+        }
         Ok(())
     }
 
@@ -606,6 +696,17 @@ impl Collector {
         let now = Instant::now();
 
         for bucket in buckets.iter_mut() {
+            let unsynchronized: Vec<String> = bucket.awaiting_snapshot.iter().cloned().collect();
+            if !unsynchronized.is_empty() {
+                warn!(
+                    "{} market(s) still awaiting a fresh snapshot; their deltas are held back",
+                    unsynchronized.len()
+                );
+                bucket.request_snapshots(unsynchronized);
+            }
+
+            // A quiet market is often just illiquid, so keep its subscription in place
+            // and confirm its book with a snapshot rather than removing and re-adding it.
             let stale: Vec<String> = bucket
                 .markets
                 .iter()
@@ -619,14 +720,10 @@ impl Collector {
                 .collect();
 
             if !stale.is_empty() {
-                warn!(
-                    "Resubscribing {} stale market(s): {:?}",
-                    stale.len(),
-                    &stale[..stale.len().min(5)]
-                );
-                for s in &bucket.sockets {
-                    let _ = s.cmd_tx.send(SocketCmd::RemoveMarkets(stale.clone()));
-                    let _ = s.cmd_tx.send(SocketCmd::AddMarkets(stale.clone()));
+                let sample = stale[..stale.len().min(5)].to_vec();
+                let requested = bucket.request_snapshots(stale);
+                if requested > 0 {
+                    debug!("Requested snapshots for {requested} quiet market(s): {sample:?}");
                 }
             }
         }
@@ -661,7 +758,7 @@ impl Collector {
                             "Promoting shadow socket {} to primary before recycling primary socket {}",
                             bucket.sockets[new_primary].socket_id, bucket.sockets[i].socket_id
                         );
-                        bucket.primary_idx = new_primary;
+                        self.promote_primary(bucket, new_primary)?;
                     }
                 }
 
@@ -733,6 +830,43 @@ struct BucketState {
     primary_idx: usize,
     socket_reconnect_at: Vec<Instant>,
     reconnect_attempts: Vec<u32>,
+    /// Markets whose book is known to be incomplete until a fresh snapshot arrives.
+    awaiting_snapshot: HashSet<String>,
+    /// When each market's snapshot was last requested on the current primary.
+    last_snapshot_request: HashMap<String, Instant>,
+}
+
+impl BucketState {
+    /// Ask the primary for snapshots, skipping markets requested very recently.
+    ///
+    /// A primary without a sid is still subscribing, and its initial snapshots
+    /// will arrive without a request. Returns the number of markets requested.
+    fn request_snapshots(&mut self, tickers: Vec<String>) -> usize {
+        let primary = &self.sockets[self.primary_idx];
+        if primary.sid.is_none() {
+            return 0;
+        }
+
+        let now = Instant::now();
+        let due: Vec<String> = tickers
+            .into_iter()
+            .filter(|ticker| {
+                self.last_snapshot_request
+                    .get(ticker)
+                    .is_none_or(|&last| now.duration_since(last) >= SNAPSHOT_REQUEST_COOLDOWN)
+            })
+            .collect();
+        if due.is_empty() {
+            return 0;
+        }
+
+        for ticker in &due {
+            self.last_snapshot_request.insert(ticker.clone(), now);
+        }
+        let requested = due.len();
+        let _ = primary.cmd_tx.send(SocketCmd::GetSnapshot(due));
+        requested
+    }
 }
 
 struct SocketHandle {
@@ -852,9 +986,22 @@ async fn ws_task_inner(
         .map(Duration::from_millis)
         .unwrap_or(Duration::from_secs(30));
 
-    let mut ping_interval = time::interval(Duration::from_secs(15));
+    let ping_period = std::env::var("WS_PING_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::from_secs(15));
+
+    let mut ping_interval = time::interval(ping_period);
     // Skip initial immediate tick
     ping_interval.tick().await;
+
+    // One deadline, extended only by frames from the server, so that sending our
+    // own pings can never hide a silent connection.
+    let read_deadline = time::sleep(read_timeout);
+    tokio::pin!(read_deadline);
+
+    let mut sequences = SequenceTracker::default();
 
     loop {
         tokio::select! {
@@ -901,14 +1048,8 @@ async fn ws_task_inner(
                 }
             }
 
-            msg_res = time::timeout(read_timeout, read.next()) => {
-                let msg = match msg_res {
-                    Ok(m) => m,
-                    Err(_) => {
-                        warn!("Socket {socket_id}: read timeout after {read_timeout:?} (silent socket detected)");
-                        break;
-                    }
-                };
+            msg = read.next() => {
+                read_deadline.as_mut().reset(time::Instant::now() + read_timeout);
 
                 match msg {
                     None => {
@@ -921,18 +1062,32 @@ async fn ws_task_inner(
                     }
                     Some(Ok(Message::Text(text))) => {
                         let received_at = Utc::now();
-                        match adapter.decode_message(&text) {
+                        let frame = match adapter.decode_frame(&text) {
+                            Ok(frame) => frame,
                             Err(e) => {
                                 debug!("Socket {socket_id}: decode error: {e} in {text:.200}");
+                                continue;
                             }
-                            Ok(Some(InboundMessage::Subscribed { sid: s })) => {
+                        };
+                        if let Some(point) = frame.sequence
+                            && let Some(expected) = sequences.observe(point)
+                        {
+                            let _ = event_tx.send(WsEvent::SequenceGap {
+                                socket_id,
+                                sid: point.sid,
+                                expected,
+                                received: point.seq,
+                            });
+                        }
+                        match frame.message {
+                            Some(InboundMessage::Subscribed { sid: s }) => {
                                 sid = Some(s);
                                 let _ = event_tx.send(WsEvent::Subscribed {
                                     socket_id,
                                     sid: s,
                                 });
                             }
-                            Ok(Some(InboundMessage::Snapshot { ticker, clock, bids, asks })) => {
+                            Some(InboundMessage::Snapshot { ticker, clock, bids, asks }) => {
                                 let _ = event_tx.send(WsEvent::Snapshot {
                                     socket_id,
                                     ticker,
@@ -942,7 +1097,7 @@ async fn ws_task_inner(
                                     received_at,
                                 });
                             }
-                            Ok(Some(InboundMessage::Delta { ticker, clock, price, qty_delta, side, exchange_ts_ms })) => {
+                            Some(InboundMessage::Delta { ticker, clock, price, qty_delta, side, exchange_ts_ms }) => {
                                 let _ = event_tx.send(WsEvent::Delta {
                                     socket_id,
                                     ticker,
@@ -954,10 +1109,10 @@ async fn ws_task_inner(
                                     received_at,
                                 });
                             }
-                            Ok(Some(InboundMessage::Error { code, message })) => {
+                            Some(InboundMessage::Error { code, message }) => {
                                 warn!("Socket {socket_id}: exchange error code={:?}: {message}", code);
                             }
-                            Ok(None) => {}
+                            None => {}
                         }
                     }
                     Some(Ok(Message::Ping(d))) => {
@@ -972,6 +1127,11 @@ async fn ws_task_inner(
                     }
                     Some(Ok(_)) => {}
                 }
+            }
+
+            _ = &mut read_deadline => {
+                warn!("Socket {socket_id}: no frames for {read_timeout:?} (silent socket detected)");
+                break;
             }
         }
     }
@@ -1073,89 +1233,354 @@ mod tests {
     use crate::util::dtos::challenge_orderbook::AnyMessage;
     use crate::util::{AlignedSbeReader, OrderbookSchema};
 
-    #[tokio::test]
-    async fn stale_events_are_absent_from_sbe_output() -> Result<()> {
-        let file = tempfile::NamedTempFile::new()?;
-        let collector = Collector {
+    type CmdRx = mpsc::UnboundedReceiver<SocketCmd>;
+
+    fn test_collector(file: &tempfile::NamedTempFile) -> Result<Collector> {
+        Ok(Collector {
             adapter: Arc::new(MockAdapter::new()),
             http: reqwest::Client::new(),
             books: Arc::new(DashMap::new()),
             output: Arc::new(Mutex::new(Output::new(file.path().to_str())?)),
             shutdown: Arc::new(AtomicBool::new(false)),
             shutdown_notify: Arc::new(Notify::new()),
-            next_socket_id: Arc::new(AtomicUsize::new(0)),
+            next_socket_id: Arc::new(AtomicUsize::new(100)),
+        })
+    }
+
+    /// A subscribed bucket for market TEST: socket 1 is primary, socket 2 is shadow.
+    fn test_bucket() -> (BucketState, CmdRx, CmdRx) {
+        let (primary_tx, primary_rx) = mpsc::unbounded_channel();
+        let (shadow_tx, shadow_rx) = mpsc::unbounded_channel();
+        let socket = |socket_id, cmd_tx| SocketHandle {
+            socket_id,
+            cmd_tx,
+            sid: Some(socket_id as u64),
+            _spawned_at: Instant::now(),
         };
-        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
-        let mut buckets = vec![BucketState {
+        let later = Instant::now() + SOCKET_RECONNECT_INTERVAL;
+        let bucket = BucketState {
             markets: HashSet::from(["TEST".to_owned()]),
-            sockets: vec![SocketHandle {
-                socket_id: 1,
-                cmd_tx,
-                sid: Some(1),
-                _spawned_at: Instant::now(),
-            }],
+            sockets: vec![socket(1, primary_tx), socket(2, shadow_tx)],
             primary_idx: 0,
-            socket_reconnect_at: vec![Instant::now() + SOCKET_RECONNECT_INTERVAL],
-            reconnect_attempts: vec![0],
-        }];
+            socket_reconnect_at: vec![later, later],
+            reconnect_attempts: vec![0, 0],
+            awaiting_snapshot: HashSet::new(),
+            last_snapshot_request: HashMap::new(),
+        };
+        (bucket, primary_rx, shadow_rx)
+    }
+
+    fn delta(socket_id: usize, clock: u64, qty_delta: i64) -> WsEvent {
+        WsEvent::Delta {
+            socket_id,
+            ticker: "TEST".to_owned(),
+            clock,
+            price: 500_000,
+            qty_delta,
+            side: Side::Buy,
+            exchange_ts_ms: None,
+            received_at: Utc::now(),
+        }
+    }
+
+    fn snapshot(socket_id: usize, clock: u64, qty: i64) -> WsEvent {
+        WsEvent::Snapshot {
+            socket_id,
+            ticker: "TEST".to_owned(),
+            clock,
+            bids: vec![(500_000, qty)],
+            asks: vec![],
+            received_at: Utc::now(),
+        }
+    }
+
+    async fn feed(
+        collector: &Collector,
+        buckets: &mut Vec<BucketState>,
+        last_update: &mut HashMap<String, Instant>,
+        events: Vec<WsEvent>,
+    ) -> Result<()> {
         let (event_tx, _event_rx) = mpsc::unbounded_channel();
-        let mut last_update = HashMap::new();
-        for (socket_id, clock, qty) in [
-            (1, 10, 100),
-            (1, 9, 900),
-            (2, 11, 900),
-            (1, 10, 20),
-            (1, 11, 30),
-        ] {
+        for event in events {
             collector
-                .handle_event(
-                    WsEvent::Delta {
-                        socket_id,
-                        ticker: "TEST".to_owned(),
-                        clock,
-                        price: 500_000,
-                        qty_delta: qty,
-                        side: Side::Buy,
-                        exchange_ts_ms: None,
-                        received_at: Utc::now(),
-                    },
-                    &mut buckets,
-                    &event_tx,
-                    &mut last_update,
-                )
+                .handle_event(event, buckets, &event_tx, last_update)
                 .await?;
         }
-        let last_accepted = last_update["TEST"];
-        collector
-            .handle_event(
-                WsEvent::Snapshot {
-                    socket_id: 1,
-                    ticker: "TEST".to_owned(),
-                    clock: 9,
-                    bids: vec![(500_000, 999)],
-                    asks: vec![],
-                    received_at: Utc::now(),
-                },
-                &mut buckets,
-                &event_tx,
-                &mut last_update,
-            )
-            .await?;
-        assert_eq!(last_update["TEST"], last_accepted);
+        Ok(())
+    }
+
+    /// Every message in the output, in order: `Ok(qty)` for an update, `Err(())` for a snapshot.
+    fn written(
+        collector: &Collector,
+        file: &tempfile::NamedTempFile,
+    ) -> Result<Vec<std::result::Result<i64, ()>>> {
+        collector.output.lock().flush()?;
+        let mut reader = AlignedSbeReader::<OrderbookSchema>::open(file.path())?;
+        let mut messages = Vec::new();
+        while let Some(message) = reader.read_msg()? {
+            messages.push(match message {
+                AnyMessage::PriceLevelUpdate(update) => Ok(update.quantity()),
+                _ => Err(()),
+            });
+        }
+        Ok(messages)
+    }
+
+    fn drain(rx: &mut CmdRx) -> Vec<SocketCmd> {
+        std::iter::from_fn(|| rx.try_recv().ok()).collect()
+    }
+
+    fn is_snapshot_request(commands: &[SocketCmd]) -> bool {
+        matches!(commands, [SocketCmd::GetSnapshot(tickers)] if tickers == &["TEST".to_owned()])
+    }
+
+    #[test]
+    fn sequence_tracker_reports_skips_and_repeats_per_subscription() {
+        let mut tracker = SequenceTracker::default();
+        let point = |sid, seq| SequencePoint { sid, seq };
+
+        assert_eq!(
+            tracker.observe(point(1, 5)),
+            None,
+            "first frame sets baseline"
+        );
+        assert_eq!(tracker.observe(point(1, 6)), None);
+        assert_eq!(
+            tracker.observe(point(2, 40)),
+            None,
+            "subscriptions are separate"
+        );
+        assert_eq!(tracker.observe(point(1, 8)), Some(7), "skipped seq 7");
+        assert_eq!(tracker.observe(point(1, 8)), Some(9), "repeated seq 8");
+        assert_eq!(tracker.observe(point(1, 9)), None);
+    }
+
+    #[tokio::test]
+    async fn stale_events_are_absent_and_quantities_are_absolute() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (bucket, mut primary_rx, _shadow_rx) = test_bucket();
+        let mut buckets = vec![bucket];
+        let mut last_update = HashMap::new();
+
+        let events = vec![
+            delta(1, 10, 100),
+            delta(1, 9, 900),
+            delta(2, 11, 900),
+            delta(1, 10, 20),
+            delta(1, 11, 30),
+        ];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+
         assert_eq!(
             collector.books.get("TEST").unwrap().best_bid(),
             Some((500_000, 150))
         );
-        collector.output.lock().flush()?;
-        let mut reader = AlignedSbeReader::<OrderbookSchema>::open(file.path())?;
-        let mut quantities = Vec::new();
-        while let Some(message) = reader.read_msg()? {
-            match message {
-                AnyMessage::PriceLevelUpdate(delta) => quantities.push(delta.quantity()),
-                _ => panic!("stale snapshot must not be emitted"),
-            }
-        }
-        assert_eq!(quantities, vec![100, 20, 30]);
+        assert_eq!(
+            written(&collector, &file)?,
+            vec![Ok(100), Ok(120), Ok(150)],
+            "updates carry the absolute size at the level, as the schema requires"
+        );
+        assert!(
+            is_snapshot_request(&drain(&mut primary_rx)),
+            "a lower clock on the primary requests a snapshot"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn reductions_write_remaining_size_and_removal_writes_zero() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (bucket, _primary_rx, _shadow_rx) = test_bucket();
+        let mut buckets = vec![bucket];
+        let mut last_update = HashMap::new();
+
+        let events = vec![delta(1, 1, 100), delta(1, 2, -40), delta(1, 3, -60)];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+
+        assert_eq!(written(&collector, &file)?, vec![Ok(100), Ok(60), Ok(0)]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn snapshot_replaces_book_after_clock_reset() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (bucket, _primary_rx, _shadow_rx) = test_bucket();
+        let mut buckets = vec![bucket];
+        let mut last_update = HashMap::new();
+
+        // Maintenance resets the clock from 1000 to 5.
+        let events = vec![
+            delta(1, 1000, 100),
+            delta(1, 6, 900),
+            snapshot(1, 5, 70),
+            delta(1, 6, 30),
+        ];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+
+        let book = collector.books.get("TEST").unwrap();
+        assert_eq!(book.clock, 6);
+        assert_eq!(book.best_bid(), Some((500_000, 100)));
+        drop(book);
+        assert_eq!(
+            written(&collector, &file)?,
+            vec![Ok(100), Err(()), Ok(100)],
+            "the rejected delta is absent and the book resumes from the snapshot"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn sequence_gap_holds_deltas_until_fresh_snapshot() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (bucket, mut primary_rx, _shadow_rx) = test_bucket();
+        let mut buckets = vec![bucket];
+        let mut last_update = HashMap::new();
+
+        let gap = WsEvent::SequenceGap {
+            socket_id: 1,
+            sid: 1,
+            expected: 7,
+            received: 9,
+        };
+        let events = vec![
+            delta(1, 10, 100),
+            gap,
+            delta(1, 11, 5),
+            snapshot(1, 12, 500),
+            delta(1, 13, 1),
+        ];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+
+        assert!(is_snapshot_request(&drain(&mut primary_rx)));
+        assert!(buckets[0].awaiting_snapshot.is_empty());
+        assert_eq!(
+            written(&collector, &file)?,
+            vec![Ok(100), Err(()), Ok(501)],
+            "the delta after the gap is held back and the snapshot restores the book"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn shadow_sequence_gap_does_not_interrupt_primary() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (bucket, mut primary_rx, mut shadow_rx) = test_bucket();
+        let mut buckets = vec![bucket];
+        let mut last_update = HashMap::new();
+
+        let gap = WsEvent::SequenceGap {
+            socket_id: 2,
+            sid: 2,
+            expected: 7,
+            received: 9,
+        };
+        let events = vec![gap, delta(1, 10, 100)];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+
+        assert!(drain(&mut primary_rx).is_empty());
+        assert!(drain(&mut shadow_rx).is_empty());
+        assert_eq!(written(&collector, &file)?, vec![Ok(100)]);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn recycling_primary_resynchronizes_from_new_primary() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (mut bucket, mut primary_rx, mut shadow_rx) = test_bucket();
+        bucket.socket_reconnect_at[0] = Instant::now();
+        let mut buckets = vec![bucket];
+        let mut last_update = HashMap::new();
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+
+        // Clock 11 reaches the shadow first and is ignored there, then the swap happens.
+        let events = vec![delta(1, 10, 100), delta(2, 11, 1)];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+        collector
+            .maybe_reconnect_sockets(&mut buckets, &event_tx)
+            .await?;
+
+        assert_eq!(buckets[0].primary_idx, 1);
+        assert!(matches!(
+            drain(&mut primary_rx).as_slice(),
+            [SocketCmd::Close]
+        ));
+        assert!(
+            is_snapshot_request(&drain(&mut shadow_rx)),
+            "the new primary must be asked for a fresh snapshot"
+        );
+
+        // Clock 11 is lost to both feeds, so clock 12 alone must not extend the book.
+        let events = vec![delta(1, 11, 1), delta(2, 12, 1), snapshot(2, 12, 102)];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+
+        assert_eq!(
+            collector.books.get("TEST").unwrap().best_bid(),
+            Some((500_000, 102))
+        );
+        assert_eq!(
+            written(&collector, &file)?,
+            vec![Ok(100), Err(()), Err(())],
+            "first the update, then the continuity snapshot, then the fresh snapshot"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn failover_does_not_double_count_equal_clock_deltas() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (bucket, _primary_rx, mut shadow_rx) = test_bucket();
+        let mut buckets = vec![bucket];
+        let mut last_update = HashMap::new();
+
+        let events = vec![
+            delta(1, 10, 100),
+            WsEvent::Disconnected { socket_id: 1 },
+            // The new primary replays the same exchange action at the same clock.
+            delta(2, 10, 100),
+            snapshot(2, 10, 100),
+            delta(2, 11, 5),
+        ];
+        feed(&collector, &mut buckets, &mut last_update, events).await?;
+
+        assert!(is_snapshot_request(&drain(&mut shadow_rx)));
+        assert_eq!(
+            collector.books.get("TEST").unwrap().best_bid(),
+            Some((500_000, 105))
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn quiet_market_gets_snapshot_without_losing_its_subscription() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = test_collector(&file)?;
+        let (bucket, mut primary_rx, mut shadow_rx) = test_bucket();
+        let mut buckets = vec![bucket];
+        let last_update = HashMap::from([(
+            "TEST".to_owned(),
+            Instant::now() - SYMBOL_IDLE_THRESHOLD - Duration::from_secs(1),
+        )]);
+
+        collector
+            .monitor_subscriptions(&mut buckets, &last_update)
+            .await?;
+        assert!(is_snapshot_request(&drain(&mut primary_rx)));
+        assert!(drain(&mut shadow_rx).is_empty());
+
+        collector
+            .monitor_subscriptions(&mut buckets, &last_update)
+            .await?;
+        assert!(
+            drain(&mut primary_rx).is_empty(),
+            "repeat requests wait for the cooldown"
+        );
         Ok(())
     }
 }

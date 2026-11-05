@@ -459,7 +459,7 @@ async fn test_stress_scenario_2_reconnect_storm_and_exponential_backoff() {
 // ══════════════════════════════════════════════════════════════════════════════
 
 #[tokio::test]
-async fn test_stress_scenario_3_http_429_rate_limit_and_fallback() {
+async fn test_stress_scenario_3_http_429_rate_limit_and_retry() {
     let _lock = TEST_MUTEX.lock().await;
 
     let res = tokio::time::timeout(Duration::from_secs(5), async {
@@ -489,7 +489,7 @@ async fn test_stress_scenario_3_http_429_rate_limit_and_fallback() {
             "Error must reflect HTTP 429 rate limit response: {err_str}"
         );
 
-        // 2. Mock WebSocket server accepts seed market subscription
+        // 2. Mock WebSocket server records any subscription
         let seed_market_subscribed = Arc::new(AtomicBool::new(false));
         let seed_subscribed_clone = Arc::clone(&seed_market_subscribed);
 
@@ -530,8 +530,8 @@ async fn test_stress_scenario_3_http_429_rate_limit_and_fallback() {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
         assert!(
-            seed_market_subscribed.load(Ordering::SeqCst),
-            "Collector must fall back to seed markets when REST returns HTTP 429"
+            !seed_market_subscribed.load(Ordering::SeqCst),
+            "Collector must not subscribe to invented markets while REST returns HTTP 429"
         );
 
         // 3. Rate limit clears: REST server returns 200 OK
@@ -543,6 +543,12 @@ async fn test_stress_scenario_3_http_429_rate_limit_and_fallback() {
         );
         assert_eq!(recovered_res.unwrap(), vec!["KXBTCD-26NOV05"]);
 
+        tokio::time::sleep(Duration::from_millis(1_200)).await;
+        assert!(
+            seed_market_subscribed.load(Ordering::SeqCst),
+            "Collector must retry discovery and subscribe once the rate limit clears"
+        );
+
         collector.shutdown();
         let _ = run_handle.await.unwrap();
 
@@ -553,7 +559,7 @@ async fn test_stress_scenario_3_http_429_rate_limit_and_fallback() {
         }
         assert!(
             count > 0,
-            "Seed market data must be written to SBE output under 429 fallback"
+            "Market data must be written to SBE output after the rate limit clears"
         );
     })
     .await;
@@ -641,6 +647,16 @@ async fn test_stress_scenario_4_midstream_packet_loss_and_shadow_failover() {
                     while let Some(Ok(Message::Text(cmd))) = read.next().await {
                         if cmd.contains("get_snapshot") {
                             shadow_get_snap.store(true, Ordering::SeqCst);
+
+                            let snap = serde_json::json!({
+                                "type": "snapshot",
+                                "ticker": "KXBTCD-26NOV05",
+                                "clock": 110,
+                                "bids": [[450_000, 20_000_000]],
+                                "asks": [[550_000, 10_000_000]]
+                            })
+                            .to_string();
+                            let _ = write.send(Message::Text(snap.into())).await;
 
                             // Send post-failover deltas on newly promoted primary
                             for c in 111..=115 {

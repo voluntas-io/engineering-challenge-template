@@ -418,7 +418,7 @@ fn test_no_dead_code_elimination_in_benchmarked_paths() {
 
     // 2. decode_message must produce genuine InboundMessage
     let adapter = create_test_adapter();
-    let json_delta = r#"{"type":"orderbook_delta","sid":101,"seq":54321,"msg":{"market_ticker":"KXFED-24DEC-T5.00","clock":4096,"ts_ms":1700000000123,"price":"0.4200","delta":"-5.00","side":"yes"}}"#;
+    let json_delta = r#"{"type":"orderbook_delta","sid":101,"seq":54321,"msg":{"market_ticker":"KXFED-24DEC-T5.00","clock":4096,"ts_ms":1700000000123,"price_dollars":"0.4200","delta_fp":"-5.00","side":"yes"}}"#;
     let decoded = adapter
         .decode_message(black_box(json_delta))
         .expect("decode succeeds");

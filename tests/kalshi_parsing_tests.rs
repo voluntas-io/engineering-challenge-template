@@ -188,3 +188,65 @@ mod tests {
         assert_eq!(parse_dollars_fp("  0.4200 "), Some(420_000));
     }
 }
+
+// The messages below are the samples published in Kalshi's orderbook documentation:
+// https://docs.kalshi.com/websockets/orderbook-updates
+
+const DOCUMENTED_DELTA: &str = r#"{"type":"orderbook_delta","sending_ts_ms":1669149841123,"sid":2,"seq":3,"msg":{"market_ticker":"FED-23DEC-T3.00","market_id":"9b0f6b43-5b68-4f9f-9f02-9a2d1b8ac1a1","clock":4182061,"price_dollars":"0.9600","delta_fp":"-54.00","side":"yes","ts":"2022-11-22T20:44:01Z","ts_ms":1669149841000}}"#;
+const TEST_KEY_PEM: &str = "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpgDo+hAyk2Dm9MbLdzYXBKkGRsYHgPAEBg\n-----END PRIVATE KEY-----\n";
+
+fn documented_adapter() -> engineering_challenge::kalshi::KalshiAdapter {
+    let cred = engineering_challenge::auth::Credential::from_pem("test-key", TEST_KEY_PEM).unwrap();
+    engineering_challenge::kalshi::KalshiAdapter::new(std::sync::Arc::new(cred))
+}
+
+#[test]
+fn documented_delta_decodes_with_its_sequence_position() {
+    use engineering_challenge::adapter::{ExchangeAdapter, InboundMessage, SequencePoint};
+
+    let frame = documented_adapter().decode_frame(DOCUMENTED_DELTA).unwrap();
+
+    assert_eq!(frame.sequence, Some(SequencePoint { sid: 2, seq: 3 }));
+    match frame.message {
+        Some(InboundMessage::Delta {
+            ticker,
+            clock,
+            price,
+            qty_delta,
+            side,
+            exchange_ts_ms,
+        }) => {
+            assert_eq!(ticker, "FED-23DEC-T3.00");
+            assert_eq!(clock, 4182061);
+            assert_eq!(price, 960_000);
+            assert_eq!(qty_delta, -54_000_000);
+            assert_eq!(side, engineering_challenge::Side::Buy);
+            assert_eq!(exchange_ts_ms, Some(1669149841000));
+        }
+        other => panic!("documented delta must decode, got {other:?}"),
+    }
+}
+
+#[test]
+fn documented_no_side_delta_maps_to_complement_ask() {
+    use engineering_challenge::adapter::{ExchangeAdapter, InboundMessage};
+
+    let text = DOCUMENTED_DELTA.replace(r#""side":"yes""#, r#""side":"no""#);
+    match documented_adapter().decode_message(&text).unwrap() {
+        Some(InboundMessage::Delta { price, side, .. }) => {
+            assert_eq!(price, 40_000);
+            assert_eq!(side, engineering_challenge::Side::Sell);
+        }
+        other => panic!("documented NO delta must decode, got {other:?}"),
+    }
+}
+
+#[test]
+fn documented_snapshot_carries_sequence_position() {
+    use engineering_challenge::adapter::{ExchangeAdapter, SequencePoint};
+
+    let text = r#"{"type":"orderbook_snapshot","sid":2,"seq":2,"msg":{"market_ticker":"FED-23DEC-T3.00","market_id":"9b0f6b43-5b68-4f9f-9f02-9a2d1b8ac1a1","clock":4182057,"yes_dollars_fp":[["0.0800","300.00"]],"no_dollars_fp":[["0.5400","20.00"]]}}"#;
+    let frame = documented_adapter().decode_frame(text).unwrap();
+    assert_eq!(frame.sequence, Some(SequencePoint { sid: 2, seq: 2 }));
+    assert!(frame.message.is_some());
+}
