@@ -49,22 +49,19 @@ impl AlignedSbeWriter {
             self.flush()?;
         }
 
-        self.buf.reserve(len);
         let start = self.buf.len();
-        // SAFETY: We reserved at least `len` bytes in `self.buf`. We encode directly into
-        // the uninitialized tail slice to eliminate redundant zero-initialization (memset).
-        // `self.buf.set_len` is only updated after `encode` succeeds and verifies `written == len`.
-        unsafe {
-            let slice = std::slice::from_raw_parts_mut(self.buf.as_mut_ptr().add(start), len);
-            message.encode(slice).and_then(|written| {
-                anyhow::ensure!(
-                    written == len,
-                    "SBE encoded length mismatch: expected {len} bytes, wrote {written}"
-                );
-                self.buf.set_len(start + written);
-                Ok(())
-            })
+        self.buf.resize(start + len, 0);
+        let result = message.encode(&mut self.buf[start..]).and_then(|written| {
+            anyhow::ensure!(
+                written == len,
+                "SBE encoded length mismatch: expected {len} bytes, wrote {written}"
+            );
+            Ok(())
+        });
+        if result.is_err() {
+            self.buf.truncate(start);
         }
+        result
     }
 
     /// Flush the current buffer to disk, and clear it.
@@ -74,6 +71,45 @@ impl AlignedSbeWriter {
             let write_res = self.file.write_all(&self.buf);
             self.buf.clear();
             write_res?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct FailingMessage(bool);
+
+    impl SbeEncode for FailingMessage {
+        fn encoded_length_with_header(&self) -> anyhow::Result<usize> {
+            Ok(8)
+        }
+
+        fn encode(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
+            // Safe encoders may read their buffer before writing it.
+            assert!(buf.iter().all(|byte| *byte == 0));
+            buf.fill(42);
+            if self.0 {
+                anyhow::bail!("encoding failed");
+            }
+            Ok(7)
+        }
+    }
+
+    #[test]
+    fn failed_or_short_encoding_preserves_prior_messages() -> anyhow::Result<()> {
+        for fail in [false, true] {
+            let file = tempfile::NamedTempFile::new()?;
+            let mut writer = AlignedSbeWriter::create(file.path(), 32)?;
+            writer.buf.extend_from_slice(&[1, 2, 3]);
+            assert!(writer.write_msg(&FailingMessage(fail)).is_err());
+            assert_eq!(writer.buf, [1, 2, 3]);
+            writer.flush()?;
+            let bytes = std::fs::read(file.path())?;
+            assert_eq!(&bytes[..3], &[1, 2, 3]);
+            assert!(bytes[3..].iter().all(|byte| *byte == 0));
         }
         Ok(())
     }

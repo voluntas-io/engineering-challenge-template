@@ -43,10 +43,15 @@ fn load_dotenv() {
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
     load_dotenv();
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(run())
+}
 
+async fn run() -> Result<()> {
     // Structured logging: write to stderr so stdout is reserved for SBE binary data
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -74,7 +79,9 @@ async fn main() -> Result<()> {
             }
             Err(e) => {
                 warn!("Kalshi credentials not found: {e:#}");
-                warn!("Falling back to MockAdapter. Set KALSHI_API_KEY_ID & KALSHI_PRIVATE_KEY for live exchange connection.");
+                warn!(
+                    "Falling back to MockAdapter. Set KALSHI_API_KEY_ID & KALSHI_PRIVATE_KEY for live exchange connection."
+                );
                 Arc::new(MockAdapter::new())
             }
         }

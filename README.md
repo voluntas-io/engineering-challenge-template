@@ -53,6 +53,16 @@ matches the SBE schema.
 3. Requests a fresh `get_snapshot` on the new primary to resynchronise.
 4. Respawns a new shadow socket.
 
+This is a redundancy and recovery mechanism, not a zero-message-loss guarantee.
+Shadow updates are ignored until promotion; recovery depends on receiving a fresh
+snapshot. Updates with clocks older than the current book are rejected before
+state mutation and SBE output. Equal clocks remain accepted; this is not a
+guarantee of duplicate suppression or ordering across independent connections.
+
+The SBE writer encodes into initialized buffer memory using safe Rust. Startup
+still uses `unsafe` environment-variable initialization, before creating the Tokio
+runtime. Do not describe the entire implementation as 100% safe Rust.
+
 **Subscription monitoring** (Extension 2):
 - Every 30 s, check each market's last-update timestamp.
 - If a market hasn't received any update in 90 s, it is unsubscribed and
@@ -122,7 +132,7 @@ The output file contains SBE-encoded messages in the `challenge_orderbook` schem
 | Message | Trigger | Fields |
 |---------|---------|--------|
 | `Snapshot` | On initial subscribe + every 60 s | `symbol`, `received_at`, `exchange_timestamp`, `bids[]`, `asks[]` |
-| `PriceLevelUpdate` | On every delta from exchange | `symbol`, `backtest_timestamp`, `exchange_timestamp`, `price_level`, `quantity`, `side` |
+| `PriceLevelUpdate` | On accepted primary-socket deltas | `symbol`, `backtest_timestamp`, `exchange_timestamp`, `price_level`, `quantity`, `side` |
 
 Use `AlignedSbeReader<OrderbookSchema>` from the template library to decode.
 

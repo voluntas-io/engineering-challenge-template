@@ -20,8 +20,8 @@
 //!    [`ExchangeAdapter`]. Exchange-specific JSON encoding/decoding is isolated.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
@@ -29,7 +29,7 @@ use chrono::Utc;
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::Mutex;
-use tokio::sync::{mpsc, Notify};
+use tokio::sync::{Notify, mpsc};
 use tokio::time;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{debug, error, info, warn};
@@ -170,7 +170,9 @@ impl Collector {
                     mkts
                 }
                 Ok(_) | Err(_) => {
-                    warn!("REST market discovery returned no markets or failed; using seed markets");
+                    warn!(
+                        "REST market discovery returned no markets or failed; using seed markets"
+                    );
                     vec![
                         "KXBTCD-26NOV05".to_string(),
                         "KXHIGHNY-26NOV05".to_string(),
@@ -307,7 +309,9 @@ impl Collector {
         let (cmd_tx, cmd_rx) = mpsc::unbounded_channel::<SocketCmd>();
         let adapter = Arc::clone(&self.adapter);
 
-        tokio::spawn(ws_task(socket_id, adapter, markets, cmd_rx, event_tx, backoff));
+        tokio::spawn(ws_task(
+            socket_id, adapter, markets, cmd_rx, event_tx, backoff,
+        ));
 
         SocketHandle {
             socket_id,
@@ -330,7 +334,8 @@ impl Collector {
             WsEvent::Subscribed { socket_id, sid } => {
                 if let Some(bidx) = find_bucket_for_socket(buckets, socket_id) {
                     let bucket = &mut buckets[bidx];
-                    if let Some(pos) = bucket.sockets.iter().position(|s| s.socket_id == socket_id) {
+                    if let Some(pos) = bucket.sockets.iter().position(|s| s.socket_id == socket_id)
+                    {
                         bucket.sockets[pos].sid = Some(sid);
                         bucket.reconnect_attempts[pos] = 0;
                         debug!("Socket {socket_id} subscribed with sid={sid}");
@@ -347,6 +352,14 @@ impl Collector {
                 received_at,
             } => {
                 if !is_primary(buckets, socket_id) {
+                    return Ok(());
+                }
+                // Reject stale snapshots before either state mutation or output.
+                if self
+                    .books
+                    .get(&ticker)
+                    .is_some_and(|book| clock < book.clock)
+                {
                     return Ok(());
                 }
                 last_update.insert(ticker.clone(), Instant::now());
@@ -391,13 +404,15 @@ impl Collector {
                     return Ok(());
                 }
 
-                last_update.insert(ticker.clone(), Instant::now());
-
-                // Apply delta to in-memory book
+                // Gate output with the same clock check used by the book.
                 {
                     let mut book = self.books.entry(ticker.clone()).or_default();
+                    if clock < book.clock {
+                        return Ok(());
+                    }
                     book.apply_delta(side, price, qty_delta, clock);
                 }
+                last_update.insert(ticker.clone(), Instant::now());
 
                 // Emit delta to SBE output
                 let exchange_ts = exchange_ts_ms
@@ -436,9 +451,9 @@ impl Collector {
 
                         let markets: Vec<String> = bucket.markets.iter().cloned().collect();
                         if bucket.sockets[new_primary].sid.is_some() {
-                            let _ = bucket.sockets[new_primary].cmd_tx.send(
-                                SocketCmd::GetSnapshot(markets.clone()),
-                            );
+                            let _ = bucket.sockets[new_primary]
+                                .cmd_tx
+                                .send(SocketCmd::GetSnapshot(markets.clone()));
                         }
 
                         // Emit snapshots from current in-memory book for output continuity
@@ -448,9 +463,9 @@ impl Collector {
                                 let b = book.bids_snapshot();
                                 let a = book.asks_snapshot();
                                 drop(book);
-                                self.output.lock().write_snapshot(
-                                    ticker, now, now, &b, &a,
-                                )?;
+                                self.output
+                                    .lock()
+                                    .write_snapshot(ticker, now, now, &b, &a)?;
                             }
                         }
                     }
@@ -460,7 +475,9 @@ impl Collector {
                     bucket.reconnect_attempts[socket_pos] = attempts.saturating_add(1);
                     let backoff = calculate_backoff(attempts);
                     if !backoff.is_zero() {
-                        warn!("Applying reconnect backoff of {backoff:?} to replacement for socket {socket_id}");
+                        warn!(
+                            "Applying reconnect backoff of {backoff:?} to replacement for socket {socket_id}"
+                        );
                     }
 
                     // Respawn the failed socket with monotonic atomic ID and backoff
@@ -509,15 +526,9 @@ impl Collector {
         };
         let current_set: HashSet<String> = current.into_iter().collect();
 
-        let new_tickers: Vec<String> = current_set
-            .difference(&*known)
-            .cloned()
-            .collect();
+        let new_tickers: Vec<String> = current_set.difference(&*known).cloned().collect();
 
-        let gone_tickers: Vec<String> = known
-            .difference(&current_set)
-            .cloned()
-            .collect();
+        let gone_tickers: Vec<String> = known.difference(&current_set).cloned().collect();
 
         if !gone_tickers.is_empty() {
             info!("Removing {} closed market(s)", gone_tickers.len());
@@ -536,16 +547,14 @@ impl Collector {
         Ok(())
     }
 
-    fn remove_markets_from_buckets(
-        &self,
-        tickers: Vec<String>,
-        buckets: &mut Vec<BucketState>,
-    ) {
+    fn remove_markets_from_buckets(&self, tickers: Vec<String>, buckets: &mut Vec<BucketState>) {
         for ticker in &tickers {
             for bucket in buckets.iter_mut() {
                 if bucket.markets.remove(ticker) {
                     for s in &bucket.sockets {
-                        let _ = s.cmd_tx.send(SocketCmd::RemoveMarkets(vec![ticker.clone()]));
+                        let _ = s
+                            .cmd_tx
+                            .send(SocketCmd::RemoveMarkets(vec![ticker.clone()]));
                     }
                     break;
                 }
@@ -650,15 +659,16 @@ impl Collector {
                     if let Some(new_primary) = other_idx {
                         info!(
                             "Promoting shadow socket {} to primary before recycling primary socket {}",
-                            bucket.sockets[new_primary].socket_id,
-                            bucket.sockets[i].socket_id
+                            bucket.sockets[new_primary].socket_id, bucket.sockets[i].socket_id
                         );
                         bucket.primary_idx = new_primary;
                     }
                 }
 
                 let old_id = bucket.sockets[i].socket_id;
-                info!("Periodic staggered reconnect for bucket {bidx}, socket pos {i} (old ID {old_id})");
+                info!(
+                    "Periodic staggered reconnect for bucket {bidx}, socket pos {i} (old ID {old_id})"
+                );
 
                 // Close the old socket
                 let _ = bucket.sockets[i].cmd_tx.send(SocketCmd::Close);
@@ -666,7 +676,8 @@ impl Collector {
                 // Spawn replacement with fresh monotonic socket ID
                 let new_id = self.next_socket_id();
                 bucket.reconnect_attempts[i] = 0;
-                let new_handle = self.spawn_socket(new_id, markets.clone(), event_tx.clone(), Duration::ZERO);
+                let new_handle =
+                    self.spawn_socket(new_id, markets.clone(), event_tx.clone(), Duration::ZERO);
                 bucket.sockets[i] = new_handle;
             }
         }
@@ -691,7 +702,9 @@ fn find_socket_mut<'a>(
 }
 
 fn find_bucket_for_socket(buckets: &[BucketState], socket_id: usize) -> Option<usize> {
-    buckets.iter().position(|b| b.sockets.iter().any(|s| s.socket_id == socket_id))
+    buckets
+        .iter()
+        .position(|b| b.sockets.iter().any(|s| s.socket_id == socket_id))
 }
 
 fn is_primary(buckets: &[BucketState], socket_id: usize) -> bool {
@@ -780,10 +793,9 @@ async fn ws_task_inner(
     let ws_url = adapter.ws_url();
     let auth_headers = adapter.auth_headers();
 
-    let mut request = tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(
-        ws_url,
-    )
-    .context("parsing WS URL")?;
+    let mut request =
+        tokio_tungstenite::tungstenite::client::IntoClientRequest::into_client_request(ws_url)
+            .context("parsing WS URL")?;
 
     for (name, value) in &auth_headers {
         request.headers_mut().insert(
@@ -795,8 +807,19 @@ async fn ws_task_inner(
     }
 
     let (mut write, mut read): (
-        std::pin::Pin<Box<dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error> + Send>>,
-        std::pin::Pin<Box<dyn futures_util::Stream<Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>> + Send>>,
+        std::pin::Pin<
+            Box<
+                dyn futures_util::Sink<Message, Error = tokio_tungstenite::tungstenite::Error>
+                    + Send,
+            >,
+        >,
+        std::pin::Pin<
+            Box<
+                dyn futures_util::Stream<
+                        Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>,
+                    > + Send,
+            >,
+        >,
     ) = if let Some(stream) = crate::mock::take_mock_stream(ws_url, socket_id) {
         let (ws, _) = tokio_tungstenite::client_async(request, stream)
             .await
@@ -1041,4 +1064,98 @@ async fn mock_task(
     }
 
     let _ = event_tx.send(WsEvent::Disconnected { socket_id });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::mock::MockAdapter;
+    use crate::util::dtos::challenge_orderbook::AnyMessage;
+    use crate::util::{AlignedSbeReader, OrderbookSchema};
+
+    #[tokio::test]
+    async fn stale_events_are_absent_from_sbe_output() -> Result<()> {
+        let file = tempfile::NamedTempFile::new()?;
+        let collector = Collector {
+            adapter: Arc::new(MockAdapter::new()),
+            http: reqwest::Client::new(),
+            books: Arc::new(DashMap::new()),
+            output: Arc::new(Mutex::new(Output::new(file.path().to_str())?)),
+            shutdown: Arc::new(AtomicBool::new(false)),
+            shutdown_notify: Arc::new(Notify::new()),
+            next_socket_id: Arc::new(AtomicUsize::new(0)),
+        };
+        let (cmd_tx, _cmd_rx) = mpsc::unbounded_channel();
+        let mut buckets = vec![BucketState {
+            markets: HashSet::from(["TEST".to_owned()]),
+            sockets: vec![SocketHandle {
+                socket_id: 1,
+                cmd_tx,
+                sid: Some(1),
+                _spawned_at: Instant::now(),
+            }],
+            primary_idx: 0,
+            socket_reconnect_at: vec![Instant::now() + SOCKET_RECONNECT_INTERVAL],
+            reconnect_attempts: vec![0],
+        }];
+        let (event_tx, _event_rx) = mpsc::unbounded_channel();
+        let mut last_update = HashMap::new();
+        for (socket_id, clock, qty) in [
+            (1, 10, 100),
+            (1, 9, 900),
+            (2, 11, 900),
+            (1, 10, 20),
+            (1, 11, 30),
+        ] {
+            collector
+                .handle_event(
+                    WsEvent::Delta {
+                        socket_id,
+                        ticker: "TEST".to_owned(),
+                        clock,
+                        price: 500_000,
+                        qty_delta: qty,
+                        side: Side::Buy,
+                        exchange_ts_ms: None,
+                        received_at: Utc::now(),
+                    },
+                    &mut buckets,
+                    &event_tx,
+                    &mut last_update,
+                )
+                .await?;
+        }
+        let last_accepted = last_update["TEST"];
+        collector
+            .handle_event(
+                WsEvent::Snapshot {
+                    socket_id: 1,
+                    ticker: "TEST".to_owned(),
+                    clock: 9,
+                    bids: vec![(500_000, 999)],
+                    asks: vec![],
+                    received_at: Utc::now(),
+                },
+                &mut buckets,
+                &event_tx,
+                &mut last_update,
+            )
+            .await?;
+        assert_eq!(last_update["TEST"], last_accepted);
+        assert_eq!(
+            collector.books.get("TEST").unwrap().best_bid(),
+            Some((500_000, 150))
+        );
+        collector.output.lock().flush()?;
+        let mut reader = AlignedSbeReader::<OrderbookSchema>::open(file.path())?;
+        let mut quantities = Vec::new();
+        while let Some(message) = reader.read_msg()? {
+            match message {
+                AnyMessage::PriceLevelUpdate(delta) => quantities.push(delta.quantity()),
+                _ => panic!("stale snapshot must not be emitted"),
+            }
+        }
+        assert_eq!(quantities, vec![100, 20, 30]);
+        Ok(())
+    }
 }

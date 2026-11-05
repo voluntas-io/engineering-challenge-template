@@ -42,9 +42,10 @@ backend nodes.
 **Findings:** In preliminary testing we observed variance of 2–8 ms across
 connections opened within seconds of each other. This suggests that the load
 balancer does route connections to different backend instances. The redundant
-socket architecture (Extension 1) already exploits this — by maintaining 2
-sockets per bucket we have a 50% chance of landing on the faster path, and we
-observe the faster path's deltas first.
+socket architecture (Extension 1) maintains two connections for recovery.
+The current collector only applies primary-socket data; it does not select the
+fastest connection or race updates from both sockets. These preliminary latency
+figures are author-reported and have not been independently reproduced.
 
 **Recommendation:** Open 3–4 redundant connections per bucket and always read
 from the one with the lowest recent median `Δt`. Rotate the "primary" role to
@@ -101,8 +102,9 @@ TLS Finished). We can shorten the **reconnect** latency after a failure by:
 
 **Implementation note:** Our redundant socket design (Extension 1) already acts
 as a warm-standby pool — the shadow socket is fully subscribed and receiving
-data before we ever need it. Failover from primary to shadow costs only the
-time to emit a snapshot message, not a new handshake.
+data before promotion. Promotion avoids waiting for a new connection handshake,
+but recovery also requires processing queued events and receiving a fresh
+snapshot. This mechanism does not guarantee zero message loss.
 
 ---
 
@@ -126,7 +128,7 @@ type with enhanced networking (e.g. `c7gn.xlarge` for 100 Gbps ENA).
 | Technique                        | Expected Improvement | Implementation Cost |
 |----------------------------------|----------------------|---------------------|
 | Dedicated API host               | ~5 ms                | Zero (already done) |
-| Redundant sockets                | ~3 ms (best of 2)   | Done (Extension 1)  |
+| Redundant sockets                | Recovery benefit; fastest-path selection unimplemented | Redundancy implemented |
 | TCP_NODELAY                      | <1 ms                | Zero (tungstenite default) |
 | DNS caching                      | ~1 ms on reconnect   | Low                 |
 | Post-maintenance fast reconnect  | ~2 ms                | Medium              |
