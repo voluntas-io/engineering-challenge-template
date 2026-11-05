@@ -204,7 +204,22 @@ impl Collector {
         let mut reconnect_tick = time::interval(Duration::from_secs(60));
         reconnect_tick.set_missed_tick_behavior(time::MissedTickBehavior::Delay);
 
+        if self.shutdown.load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
         loop {
+            if self.shutdown.load(Ordering::SeqCst) {
+                info!("Shutting down WebSocket tasks");
+                for b in &mut buckets {
+                    for s in &mut b.sockets {
+                        let _ = s.cmd_tx.send(SocketCmd::Close);
+                    }
+                }
+                let _ = self.output.lock().flush();
+                break;
+            }
+
             tokio::select! {
                 biased;
 

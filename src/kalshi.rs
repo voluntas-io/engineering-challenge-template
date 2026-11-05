@@ -109,7 +109,13 @@ impl ExchangeAdapter for KalshiAdapter {
         };
 
         if env.msg_type == "subscribed" {
-            if let Some(s) = env.sid {
+            let sid = env.sid.or_else(|| {
+                env.msg
+                    .as_ref()
+                    .and_then(|m| m.get("sid"))
+                    .and_then(|s| s.as_u64())
+            });
+            if let Some(s) = sid {
                 return Ok(Some(InboundMessage::Subscribed { sid: s }));
             }
             return Ok(None);
@@ -194,11 +200,14 @@ pub async fn fetch_open_markets(client: &reqwest::Client) -> Result<Vec<String>>
 
     let mut tickers = Vec::new();
     let mut cursor: Option<String> = None;
+    let limit_str = max_markets
+        .map(|m| m.clamp(1, 1000).to_string())
+        .unwrap_or_else(|| "1000".to_string());
 
     loop {
         let mut req = client
             .get(format!("{rest_base}/markets"))
-            .query(&[("status", "open"), ("limit", "1000"), ("mve_filter", "exclude")]);
+            .query(&[("status", "open"), ("limit", limit_str.as_str()), ("mve_filter", "exclude")]);
 
         if let Some(ref c) = cursor {
             req = req.query(&[("cursor", c.as_str())]);
@@ -215,7 +224,7 @@ pub async fn fetch_open_markets(client: &reqwest::Client) -> Result<Vec<String>>
             .context("parsing GET /markets response")?;
 
         for m in resp.markets {
-            if m.status == "open" {
+            if m.status == "open" || m.status == "active" {
                 tickers.push(m.ticker);
                 if let Some(max) = max_markets {
                     if tickers.len() >= max {
