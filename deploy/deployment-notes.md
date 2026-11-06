@@ -151,7 +151,8 @@ scrape_configs:
 
 ### Alert Rules
 
-Import `docs/metric-runbook.md` alert rules into Prometheus Alertmanager.
+Define Prometheus Alertmanager rules for the readiness and failure signals
+described in `docs/operating-envelope.md` and exposed by the metrics endpoint.
 
 ### Grafana Dashboards
 

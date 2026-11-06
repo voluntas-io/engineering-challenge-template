@@ -31,7 +31,7 @@ jobs:
       - name: Test assurance audit tool
         run: python3 -m unittest discover -s scripts/assurance -p 'test_*.py'
 
-      - name: Check architecture/source/test inventories
+      - name: Check architecture traceability
         run: python3 scripts/check_architecture.py --check
 
       - name: Parse Mermaid syntax

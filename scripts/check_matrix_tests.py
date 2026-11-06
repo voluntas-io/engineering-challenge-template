@@ -1,34 +1,25 @@
 #!/usr/bin/env python3
-"""Verify that every test reference in the requirement matrix resolves.
+"""Verify the requirement-to-test matrix against declared Rust tests.
 
-The requirement-to-test matrix is an evidence contract. A reference to a test
-that no longer exists silently weakens that contract, so this gate resolves the
-names against the inventory reported by `cargo test --all-targets -- --list`
-and fails when a reference is missing or ambiguous.
+Every evidence reference must be an exact, file-qualified test name:
 
-Only table columns whose heading contains "evidence" are scanned. Inline code
-elsewhere (implementation paths, status text) is not treated as a test
-reference. Supported reference forms:
+    src/path/to/file.rs::test_name
+    tests/path/to/file.rs::test_name
 
-  module::tests::test_name
-  module::tests::{first,second}
-  module::tests::*
-  tests/file.rs::test_name
-  tests/file.rs::*
-  test_name            (bare name, for E2E tests and short references)
-  E2E `assert_helper`  (assertion helper defined in an integration-test file)
+The checker parses `#[test]` and `#[tokio::test]` declarations from the source
+tree. It therefore verifies both that the source file exists and that the named
+test is declared in that exact file. Wildcards, grouped references, bare names,
+and module-qualified Rust paths are rejected as ambiguous.
 
-Wildcards must match at least one test and are reported separately so exact
-references are preferred. Bare names must resolve to exactly one test. An
-`assert_*` name marked E2E is an assertion helper, not a `#[test]`, so it is
-resolved against helper definitions in the integration-test sources.
+The matrix must contain M1-M9 and E1-E5, every requirement must have at least
+one test reference, and the 24 mandatory evidence tests must remain
+represented. This is the single test-evidence gate; the architecture checker no
+longer keeps a duplicate list.
 """
 from __future__ import annotations
 
 import argparse
-import json
 import re
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -36,63 +27,84 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MATRIX = ROOT / "docs/requirement-test-matrix.md"
 
-IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-SNAKE_CASE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
-HELPER = re.compile(r"^assert_[a-z0-9_]+$")
-HELPER_DEFINITION = re.compile(r"^\s*fn\s+(assert_[a-z0-9_]+)\s*\(", re.MULTILINE)
-BACKTICK = re.compile(r"`([^`]+)`")
-FILE_REF = re.compile(r"^(tests/[A-Za-z0-9_./-]+\.rs)::(.+)$")
-GROUP = re.compile(r"^(.*)::\{(.*)\}$")
-WILDCARD = re.compile(r"^(.*)::\*$")
+REQUIRED_REQUIREMENTS = tuple(f"M{index}" for index in range(1, 10)) + tuple(
+    f"E{index}" for index in range(1, 6)
+)
+
+# Moved here from scripts/check_architecture.py. These names must remain in the
+# matrix even as individual rows are edited.
+REQUIRED_EVIDENCE_TESTS = frozenset(
+    {
+        "snapshot_anchors_delta_application_in_per_symbol_order",
+        "cross_symbol_output_order_is_processing_order_and_not_globally_sorted",
+        "clocked_shadow_replica_takes_over_after_source_loss",
+        "clocked_failover_anchors_resumed_deltas_and_preserves_receive_times",
+        "clockless_full_recovery_requires_acknowledged_fence_and_fresh_snapshot",
+        "recovery_snapshot_before_ack_is_rejected_without_mutation",
+        "single_socket_loss_fails_over_and_emits_anchoring_snapshot",
+        "discovery_adds_and_removes_with_controls",
+        "discovery_churn_retires_and_adds_symbols",
+        "normal_shutdown_drains_and_joins",
+        "shutdown_drains_saturated_queue_and_joins",
+        "finish_failure_on_shutdown_is_reported",
+        "negative_control_missing_update_is_detected_by_verify",
+        "payload_bytes_survive_write_and_read",
+        "checksum_mismatch_and_corrupt_manifest_fail_verification",
+        "queue_saturation_then_shutdown_stays_failed",
+        "concurrent_producers_stop_after_failure",
+        "successful_shutdown_reconciles_counters",
+        "blocked_writer_bounds_shutdown",
+        "blocked_writer_bounds_abort",
+        "graceful_shutdown_finalizes_rotated_segments",
+        "journal_accounts_for_every_delivered_payload",
+        "rejected_payloads_are_journaled_across_reconnects",
+        "journal_finalizes_and_verifies_on_graceful_shutdown",
+    }
+)
+
+ID_RE = re.compile(r"^([ME])(\d+)$")
+REFERENCE_RE = re.compile(
+    r"^(?P<file>(?:src|tests)/[A-Za-z0-9_./-]+\.rs)::"
+    r"(?P<test>[A-Za-z_][A-Za-z0-9_]*)$"
+)
+BARE_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$")
+BACKTICK_RE = re.compile(r"`([^`]+)`")
+
+# Discover `#[test]`, `#[tokio::test]`, and `#[tokio::test(...)]` declarations.
+# Other attributes between the test attribute and `fn` are allowed.
+TEST_DECL_RE = re.compile(
+    r"#\[\s*(?:tokio::)?test(?:\s*\([^\]]*\))?\s*\]"
+    r"(?:\s*(?:#\[[^\]]*\]|//[^\n]*))*"
+    r"\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+"
+    r"([A-Za-z_][A-Za-z0-9_]*)",
+    re.DOTALL,
+)
+
+
+@dataclass(frozen=True)
+class Span:
+    """One backticked span taken from an evidence column."""
+
+    text: str
+    line: int
+
+
+@dataclass
+class Row:
+    """One requirement row and the evidence spans attached to it."""
+
+    requirement: str
+    line: int
+    spans: list[Span] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
 class Reference:
-    """One test reference extracted from an evidence cell."""
+    """A file-qualified test reference."""
 
-    text: str
+    file: str
+    test: str
     line: int
-    source: str
-    e2e: bool = False
-
-
-@dataclass
-class Inventory:
-    """Test names reported by the test harness, plus E2E assertion helpers."""
-
-    lib: set[str] = field(default_factory=set)
-    files: dict[str, set[str]] = field(default_factory=dict)
-    helpers: dict[str, set[str]] = field(default_factory=dict)
-
-    def all_names(self) -> set[str]:
-        names = set(self.lib)
-        for file_names in self.files.values():
-            names.update(file_names)
-        return names
-
-    def to_json(self) -> dict[str, object]:
-        return {
-            "lib": sorted(self.lib),
-            "files": {name: sorted(names) for name, names in sorted(self.files.items())},
-            "helpers": {
-                name: sorted(names) for name, names in sorted(self.helpers.items())
-            },
-        }
-
-    @classmethod
-    def from_json(cls, payload: dict[str, object]) -> "Inventory":
-        lib = {str(name) for name in payload.get("lib", [])}
-        raw_files = payload.get("files", {})
-        files = {
-            str(name): {str(test) for test in tests}
-            for name, tests in dict(raw_files).items()
-        }
-        raw_helpers = payload.get("helpers", {})
-        helpers = {
-            str(name): {str(test) for test in tests}
-            for name, tests in dict(raw_helpers).items()
-        }
-        return cls(lib=lib, files=files, helpers=helpers)
 
 
 def split_row(line: str) -> list[str]:
@@ -125,279 +137,181 @@ def evidence_columns(header: list[str]) -> list[int]:
     return [index for index, name in enumerate(header) if "evidence" in name.lower()]
 
 
-def expand_reference(text: str) -> list[str]:
-    """Expand a grouped reference into its named members."""
-    match = GROUP.match(text)
-    if not match:
-        return [text]
-    prefix, members = match.groups()
-    expanded: list[str] = []
-    for member in members.split(","):
-        member = member.strip()
-        if not member:
-            continue
-        expanded.append(f"{prefix}::{member}" if prefix else member)
-    return expanded
-
-
-def extract_references(markdown: str) -> list[Reference]:
-    """Extract test references from evidence columns only."""
-    references: list[Reference] = []
+def scan_matrix(markdown: str) -> list[Row]:
+    """Return requirement rows with the backticked spans from evidence columns."""
+    rows: list[Row] = []
     header: list[str] | None = None
     evidence: list[int] = []
     in_table = False
+    current: Row | None = None
 
     for number, line in enumerate(markdown.splitlines(), start=1):
         if not line.lstrip().startswith("|"):
             header = None
             evidence = []
             in_table = False
+            current = None
             continue
         cells = split_row(line)
         if not in_table:
             header = cells
             evidence = evidence_columns(header)
             in_table = True
+            current = None
             continue
         if all(set(cell) <= {"-", ":", " "} for cell in cells if cell):
-            # Separator row: the next row is data.
             continue
+
+        first = cells[0] if cells else ""
+        current = Row(first, number) if ID_RE.fullmatch(first) else None
+        if current is not None:
+            rows.append(current)
+
         for index in evidence:
             if index >= len(cells):
                 continue
-            cell = cells[index]
-            for match in BACKTICK.finditer(cell):
-                span = match.group(1).strip()
-                if not is_reference(span, cell, match.start()):
-                    continue
-                e2e = cell[: match.start()].rstrip().endswith("E2E")
-                for expanded in expand_reference(span):
-                    references.append(Reference(expanded, number, span, e2e))
-    return references
+            for match in BACKTICK_RE.finditer(cells[index]):
+                span = Span(match.group(1).strip(), number)
+                if current is not None:
+                    current.spans.append(span)
+    return rows
 
 
-def is_reference(span: str, cell: str, start: int) -> bool:
-    """Decide whether a backticked span is intended as a test reference."""
-    if not span:
-        return False
-    if "::" in span or span.startswith("tests/"):
-        return True
-    before = cell[:start].rstrip()
-    if before.endswith("E2E") and IDENTIFIER.match(span):
-        return True
-    # A bare snake_case name in an evidence column is a test reference. This
-    # catches short forms such as `sequence_reset_fails_over_to_valid_shadow`
-    # that were previously allowed to drift. Other inline code (config keys,
-    # field names, function names without underscores) is not a reference.
-    return bool(SNAKE_CASE.match(span))
+def discover_tests(root: Path = ROOT) -> dict[str, set[str]]:
+    """Map every Rust source/integration file to its declared test names.
+
+    All `.rs` files under `src/` and `tests/` are included, even when they
+    declare no tests, so a reference can be distinguished from a missing file.
+    """
+    discovered: dict[str, set[str]] = {}
+    for base_name in ("src", "tests"):
+        base = root / base_name
+        if not base.is_dir():
+            continue
+        for path in sorted(base.rglob("*.rs")):
+            relative = path.relative_to(root).as_posix()
+            content = path.read_text(encoding="utf-8")
+            discovered[relative] = {
+                match.group(1) for match in TEST_DECL_RE.finditer(content)
+            }
+    return discovered
 
 
-def exact_matches(
-    name: str, inventory: Inventory, allow_short: bool = False
-) -> list[tuple[str, str]]:
-    """Return (location, resolved name) matches for an exact reference."""
-    matches: list[tuple[str, str]] = []
-    if name in inventory.lib:
-        matches.append(("lib", name))
-    if allow_short:
-        for qualified in inventory.lib:
-            if qualified.rsplit("::", 1)[-1] == name:
-                matches.append(("lib", qualified))
-    for file_name, tests in inventory.files.items():
-        if name in tests:
-            matches.append((file_name, name))
-    return matches
-
-
-def helper_matches(name: str, inventory: Inventory) -> list[tuple[str, str]]:
-    """Return (file, helper name) matches for an E2E assertion helper."""
-    return [
-        (file_name, name)
-        for file_name, names in inventory.helpers.items()
-        if name in names
-    ]
-
-
-def prefix_matches(prefix: str, inventory: Inventory) -> list[tuple[str, str]]:
-    matches: list[tuple[str, str]] = []
-    for name in inventory.lib:
-        if name.startswith(prefix):
-            matches.append(("lib", name))
-    for file_name, tests in inventory.files.items():
-        for name in tests:
-            if name.startswith(prefix):
-                matches.append((file_name, name))
-    return matches
-
-
-def resolve(reference: Reference, inventory: Inventory) -> tuple[str, str]:
-    """Resolve one reference; return (kind, resolved name) or raise ValueError."""
-    text = reference.text
-
-    if reference.e2e and HELPER.match(text):
-        matches = helper_matches(text, inventory)
-        if not matches:
-            raise ValueError(f"no E2E assertion helper named `{text}`")
-        if len(matches) > 1:
-            locations = ", ".join(sorted({file for file, _ in matches}))
-            raise ValueError(
-                f"E2E helper `{text}` is ambiguous across {locations}"
-            )
-        return "helper", matches[0][1]
-
-    file_match = FILE_REF.match(text)
-    if file_match:
-        file_name, test = file_match.groups()
-        if file_name not in inventory.files:
-            raise ValueError(f"{file_name} is not a known integration-test target")
-        if test == "*":
-            prefix = ""
-            matches = [
-                ("file", name)
-                for name in inventory.files[file_name]
-                if name.startswith(prefix)
-            ]
-        else:
-            matches = [
-                ("file", name)
-                for name in inventory.files[file_name]
-                if name == test
-            ]
-        if not matches:
-            raise ValueError(f"no test in {file_name} matches `{test}`")
-        return "file", matches[0][1]
-
-    wildcard = WILDCARD.match(text)
-    if wildcard:
-        prefix = wildcard.group(1)
-        matches = prefix_matches(prefix, inventory)
-        if not matches:
-            raise ValueError(f"wildcard `{text}` matches no test")
-        return "wildcard", f"{prefix}::* ({len(matches)} tests)"
-
+def classify(span: Span, known_names: set[str]) -> tuple[Reference | None, str | None]:
+    """Resolve one span, returning either a reference or a rejection reason."""
+    text = span.text
+    if not text:
+        return None, None
+    if "*" in text and ("::" in text or "/" in text or text == "*"):
+        return None, "wildcards are not allowed; name each test exactly"
+    if "{" in text or "}" in text:
+        return None, "grouped references are not allowed; list each test separately"
     if "::" in text:
-        matches = exact_matches(text, inventory)
-        if not matches:
-            raise ValueError(f"no test named `{text}`")
-        return "qualified", text
-
-    matches = exact_matches(text, inventory, allow_short=True)
-    if len(matches) == 1:
-        return "bare", matches[0][1]
-    if not matches:
-        raise ValueError(f"no test named `{text}`")
-    locations = ", ".join(sorted({location for location, _ in matches}))
-    raise ValueError(f"bare name `{text}` is ambiguous across {locations}")
+        match = REFERENCE_RE.fullmatch(text)
+        if not match:
+            return (
+                None,
+                "reference must be file-qualified as "
+                "src/...rs::test_name or tests/...rs::test_name",
+            )
+        return Reference(match.group("file"), match.group("test"), span.line), None
+    if BARE_RE.fullmatch(text) or text in known_names:
+        return None, "bare test name is ambiguous; qualify it with its source file"
+    return None, None
 
 
 def validate(
-    references: list[Reference], inventory: Inventory, matrix_name: str
-) -> tuple[list[str], dict[str, int]]:
-    """Resolve every reference, returning errors and a kind summary."""
+    markdown: str,
+    tests_by_file: dict[str, set[str]],
+    required_requirements: tuple[str, ...] = REQUIRED_REQUIREMENTS,
+    required_tests: frozenset[str] = REQUIRED_EVIDENCE_TESTS,
+) -> tuple[list[str], list[Reference]]:
+    """Return validation errors and every resolved reference."""
+    rows = scan_matrix(markdown)
+    known_names = set().union(*tests_by_file.values()) if tests_by_file else set()
     errors: list[str] = []
-    kinds = {"qualified": 0, "bare": 0, "file": 0, "wildcard": 0, "helper": 0}
-    for reference in references:
-        try:
-            kind, _ = resolve(reference, inventory)
-        except ValueError as error:
-            errors.append(f"{matrix_name}:{reference.line}: {reference.text}: {error}")
-            continue
-        kinds[kind] += 1
-    return errors, kinds
+    references: list[Reference] = []
+    seen: dict[str, int] = {}
+    row_references: dict[str, list[Reference]] = {}
 
-
-def run_list(root: Path, args: list[str]) -> set[str]:
-    result = subprocess.run(
-        ["cargo", "test", *args, "--locked", "--", "--list"],
-        cwd=root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"`cargo test {' '.join(args)} -- --list` failed:\n{result.stderr.strip()}"
-        )
-    names = set()
-    for line in result.stdout.splitlines():
-        if line.endswith(": test"):
-            names.add(line[: -len(": test")].strip())
-    return names
-
-
-def load_inventory_from_cargo(root: Path) -> Inventory:
-    inventory = Inventory()
-    inventory.lib = run_list(root, ["--lib"])
-    tests_dir = root / "tests"
-    if tests_dir.is_dir():
-        for path in sorted(tests_dir.glob("*.rs")):
-            file_name = f"tests/{path.name}"
-            inventory.files[file_name] = run_list(root, ["--test", path.stem])
-            helpers = set(
-                HELPER_DEFINITION.findall(path.read_text(encoding="utf-8"))
+    for row in rows:
+        if row.requirement in seen:
+            errors.append(
+                f"line {row.line}: duplicate requirement ID {row.requirement} "
+                f"(first at line {seen[row.requirement]})"
             )
-            if helpers:
-                inventory.helpers[file_name] = helpers
-    return inventory
+        else:
+            seen[row.requirement] = row.line
+        if row.requirement not in required_requirements:
+            errors.append(f"line {row.line}: unexpected requirement ID {row.requirement}")
+
+        resolved: list[Reference] = []
+        for span in row.spans:
+            reference, error = classify(span, known_names)
+            if error:
+                errors.append(f"line {span.line}: {span.text}: {error}")
+            elif reference is not None:
+                resolved.append(reference)
+        row_references[row.requirement] = resolved
+        references.extend(resolved)
+
+    for requirement in required_requirements:
+        if requirement not in seen:
+            errors.append(f"missing required requirement {requirement}")
+        elif not row_references.get(requirement):
+            errors.append(f"requirement {requirement} has no test reference")
+
+    for reference in references:
+        if reference.file not in tests_by_file:
+            errors.append(f"line {reference.line}: {reference.file} does not exist")
+        elif reference.test not in tests_by_file[reference.file]:
+            errors.append(
+                f"line {reference.line}: {reference.test} is not declared in "
+                f"{reference.file}"
+            )
+
+    present = {reference.test for reference in references}
+    for name in sorted(required_tests):
+        if name not in present:
+            errors.append(f"mandatory evidence test is missing from the matrix: {name}")
+
+    return errors, references
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--matrix", type=Path, default=MATRIX)
     parser.add_argument("--root", type=Path, default=ROOT)
-    parser.add_argument(
-        "--inventory",
-        type=Path,
-        help="read the test inventory from JSON instead of invoking cargo",
-    )
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args(argv)
 
-    matrix = args.matrix
     try:
-        markdown = matrix.read_text(encoding="utf-8")
+        markdown = args.matrix.read_text(encoding="utf-8")
     except OSError as error:
-        print(f"[FAIL] cannot read {matrix}: {error}", file=sys.stderr)
+        print(f"[FAIL] cannot read {args.matrix}: {error}", file=sys.stderr)
         return 1
 
-    if args.inventory:
-        inventory = Inventory.from_json(
-            json.loads(args.inventory.read_text(encoding="utf-8"))
-        )
-    else:
-        try:
-            inventory = load_inventory_from_cargo(args.root)
-        except (OSError, RuntimeError) as error:
-            print(f"[FAIL] could not build test inventory: {error}", file=sys.stderr)
-            return 1
-
-    references = extract_references(markdown)
-    errors, kinds = validate(references, inventory, matrix.name)
+    tests_by_file = discover_tests(args.root)
+    errors, references = validate(markdown, tests_by_file)
 
     if args.verbose:
         for reference in references:
-            try:
-                kind, resolved = resolve(reference, inventory)
-            except ValueError as error:
-                print(f"[FAIL] {matrix.name}:{reference.line}: {error}")
-            else:
-                print(f"[ok] line {reference.line}: {reference.text} -> {resolved} ({kind})")
+            print(f"[ok] line {reference.line}: {reference.file}::{reference.test}")
 
     if errors:
         for error in errors:
             print(f"[FAIL] {error}", file=sys.stderr)
         print(
-            f"[FAIL] {len(errors)} unresolved test reference(s) in {matrix.name}",
+            f"[FAIL] {len(errors)} requirement-matrix error(s) in {args.matrix.name}",
             file=sys.stderr,
         )
         return 1
 
+    rows = scan_matrix(markdown)
     print(
-        "[PASS] All matrix test references resolve: "
-        f"{len(references)} refs "
-        f"({kinds['qualified']} qualified, {kinds['bare']} bare, "
-        f"{kinds['file']} file-qualified, {kinds['wildcard']} wildcard, "
-        f"{kinds['helper']} E2E helper)"
+        f"[PASS] {len(references)} file-qualified references across "
+        f"{len(rows)} requirements; all {len(REQUIRED_EVIDENCE_TESTS)} "
+        "mandatory evidence tests are present."
     )
     return 0
 
