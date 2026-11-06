@@ -224,8 +224,8 @@ pub fn run(settings: Settings, input: &Path) -> anyhow::Result<RunReport> {
                         exchange_ts_us,
                         seq,
                         clock,
-                        connection_epoch: 0,
-                        receive_seq: 0,
+                        connection_epoch: 1,
+                        receive_seq: 1,
                     },
                 };
                 let messages = core.handle_event(source, event);
@@ -273,8 +273,8 @@ pub fn run(settings: Settings, input: &Path) -> anyhow::Result<RunReport> {
                         exchange_ts_us,
                         seq,
                         clock,
-                        connection_epoch: 0,
-                        receive_seq: 0,
+                        connection_epoch: 1,
+                        receive_seq: 1,
                     },
                 };
                 let messages = core.handle_event(source, event);
@@ -425,12 +425,20 @@ fn write_outputs(
 }
 
 fn drain_controls(core: &mut CollectorCore) {
+    use crate::model::Control;
     let controls = core.drain_controls();
     if !controls.is_empty() {
         debug!(
             count = controls.len(),
             "replay has no workers; discarding subscription controls"
         );
+    }
+    // Replay acks recovery controls immediately, as a live worker would.
+    // Snapshots/deltas use epoch 1 so they are strictly after the (0,0) fence.
+    for (source, control) in controls {
+        if let Control::Recover { generation, .. } = control {
+            core.handle_recovery_ready(source, generation, 0, 0);
+        }
     }
 }
 

@@ -40,7 +40,10 @@ impl ExchangeCapabilities {
 #[must_use]
 pub fn capabilities_for(kind: ExchangeKind) -> ExchangeCapabilities {
     match kind {
-        ExchangeKind::Kalshi => ExchangeCapabilities::new(true),
+        // Kalshi `seq` is per-subscription and cannot compare replicas. The
+        // wire `clock` is optional and is not assumed cross-replica
+        // comparable, so the core uses the clockless recovery path.
+        ExchangeKind::Kalshi => ExchangeCapabilities::new(false),
         ExchangeKind::Polymarket => ExchangeCapabilities::new(false),
     }
 }
@@ -121,7 +124,10 @@ mod tests {
 
     #[test]
     fn configured_venue_capabilities_are_explicit() {
-        assert!(capabilities_for(ExchangeKind::Kalshi).has_sequence_clock);
+        // Per-subscription `seq` does not compare replicas, and the wire
+        // `clock` is optional. Kalshi must not claim a sequence clock until
+        // a cross-replica comparable clock is verified.
+        assert!(!capabilities_for(ExchangeKind::Kalshi).has_sequence_clock);
         assert!(!capabilities_for(ExchangeKind::Polymarket).has_sequence_clock);
     }
 }

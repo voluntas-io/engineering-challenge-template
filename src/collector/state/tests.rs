@@ -512,6 +512,73 @@ fn clocked_shadow_replica_takes_over_after_source_loss() {
 }
 
 #[test]
+fn kalshi_without_clock_requires_clockless_recovery() {
+    use crate::exchange::capabilities_for;
+    use crate::exchange::kalshi::codec::{KalshiMessage, decode_kalshi_message};
+    // Build the production core for Kalshi via the capability mapping.
+    let caps = capabilities_for(ExchangeKind::Kalshi);
+    let mut core = CollectorCore::new(
+        CoreConfig::from_settings(&settings_for(ExchangeKind::Kalshi), 1, caps).unwrap(),
+    )
+    .unwrap();
+    discover_one(&mut core);
+    core.handle_status(connected_status(SOURCE_A, true), NOW);
+    core.handle_status(connected_status(SOURCE_B, true), NOW);
+
+    // Real Kalshi wire frames with no `msg.clock`.
+    let primary_payload = r#"{"type":"orderbook_snapshot","sid":1,"seq":1,"sending_ts_ms":1669149841000,"msg":{"market_ticker":"A","yes_dollars_fp":[["0.40","10.00"]],"no_dollars_fp":[["0.60","5.00"]]}}"#;
+    let standby_payload = r#"{"type":"orderbook_snapshot","sid":2,"seq":1,"sending_ts_ms":1669149841000,"msg":{"market_ticker":"A","yes_dollars_fp":[["0.41","10.00"]],"no_dollars_fp":[["0.59","5.00"]]}}"#;
+    let delta_payload = r#"{"type":"orderbook_delta","sid":1,"seq":2,"sending_ts_ms":1669149841100,"msg":{"market_ticker":"A","price_dollars":"0.40","delta_fp":"1.00","side":"yes","ts_ms":1669149841100}}"#;
+    let primary_event = match decode_kalshi_message(primary_payload, NOW).unwrap() {
+        KalshiMessage::Snapshot { event, .. } => event,
+        _ => panic!("expected snapshot"),
+    };
+    let standby_event = match decode_kalshi_message(standby_payload, NOW + 1).unwrap() {
+        KalshiMessage::Snapshot { event, .. } => event,
+        _ => panic!("expected snapshot"),
+    };
+    let delta_event = match decode_kalshi_message(delta_payload, NOW + 2).unwrap() {
+        KalshiMessage::Delta { event, .. } => event,
+        _ => panic!("expected delta"),
+    };
+    // Wire frames without `msg.clock` must decode with no clock.
+    for event in [&primary_event, &standby_event, &delta_event] {
+        match event {
+            ExchangeEvent::Snapshot { meta, .. } | ExchangeEvent::LevelChange { meta, .. } => {
+                assert_eq!(meta.clock, None, "wire without clock must stay clockless");
+            }
+            _ => panic!("unexpected event"),
+        }
+    }
+    core.handle_event(SOURCE_A, primary_event);
+    core.handle_event(SOURCE_A, delta_event);
+    core.handle_event(SOURCE_B, standby_event);
+
+    // Primary disconnects. The standby book is valid but its freshness
+    // cannot be proven without a comparable clock.
+    let outputs = core.handle_status(connected_status(SOURCE_A, false), NOW + 10);
+    assert!(
+        outputs.is_empty(),
+        "stale standby must not be promoted without a clock"
+    );
+    assert_eq!(core.markets["A"].active, None);
+    assert_eq!(core.markets["A"].continuity, ContinuityState::Resyncing);
+    // Clockless recovery: request, ack, reject before fence, accept after.
+    let (generation, _symbols, _reconnect) = recovery_control(&mut core, SOURCE_B);
+    let before = core.handle_event(
+        SOURCE_B,
+        snapshot_event_fenced("A", 425_000, 575_000, None, NOW + 11, 2, 1),
+    );
+    assert!(before.is_empty());
+    core.handle_recovery_ready(SOURCE_B, generation, 1, 7);
+    let after = core.handle_event(
+        SOURCE_B,
+        snapshot_event_fenced("A", 425_000, 575_000, None, NOW + 12, 2, 8),
+    );
+    assert_eq!(after.len(), 1);
+}
+
+#[test]
 fn shadow_snapshot_does_not_reset_active_probe_state() {
     let mut core = core();
     discover_one(&mut core);

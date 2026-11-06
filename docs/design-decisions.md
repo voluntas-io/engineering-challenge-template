@@ -15,7 +15,11 @@ whether a sequence clock was available.
 reports `ExchangeCapabilities`, currently `has_sequence_clock`; the core
 consumes that value and never matches on a venue name. The coordinator obtains
 capabilities from the constructed adapter, and the replay composition root uses
-the same `capabilities_for` mapping.
+the same `capabilities_for` mapping. Both adapters currently report `false`:
+Kalshi's per-subscription `seq` cannot compare replicas, and its wire `clock`
+is optional and not treated as cross-replica comparable until verified. They
+therefore use the clockless recovery fence; synthetic clocked tests exercise
+the capable path directly.
 
 **Alternatives.** Keep `ExchangeKind` checks inside the core; build a separate
 state machine per venue; assume every venue has a sequence clock.
@@ -29,7 +33,8 @@ core decision depends on a venue feature.
 `src/exchange/polymarket/mod.rs`, `src/collector/state.rs` (`CoreConfig`).
 
 **Verification.** `src/exchange/mod.rs::configured_venue_capabilities_are_explicit`,
-`src/collector/state/tests.rs::capabilities_are_not_derived_from_the_venue_name`.
+`src/collector/state/tests.rs::capabilities_are_not_derived_from_the_venue_name`,
+`src/collector/state/tests.rs::kalshi_without_clock_requires_clockless_recovery`.
 
 ## 2. Canonical market model
 

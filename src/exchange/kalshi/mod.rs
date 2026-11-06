@@ -1,7 +1,7 @@
 //! Kalshi exchange adapter.
 
 mod auth;
-mod codec;
+pub(crate) mod codec;
 mod discovery;
 mod session;
 
