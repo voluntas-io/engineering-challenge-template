@@ -43,6 +43,9 @@ jobs:
       - name: Test
         run: cargo test --all-targets --locked
 
+      - name: Verify requirement-matrix test references
+        run: python3 scripts/check_matrix_tests.py
+
       - name: Test journal on an isolated ext4 filesystem (ENOSPC)
         run: scripts/verify-journal-enospc.sh
 

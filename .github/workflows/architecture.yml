@@ -25,7 +25,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test architecture gate itself
+      - name: Test repository gates
         run: python3 -m unittest discover -s scripts -p 'test_*.py'
 
       - name: Test assurance audit tool

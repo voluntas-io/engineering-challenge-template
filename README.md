@@ -363,7 +363,7 @@ exists, the local receive time is used.
 
 Deterministic tests:
 `collector::state::tests::snapshot_anchors_delta_application_in_per_symbol_order`,
-`collector::state::tests::failover_snapshot_anchors_resumed_deltas_and_preserves_receive_times`,
+`collector::state::tests::clocked_failover_anchors_resumed_deltas_and_preserves_receive_times`,
 `collector::state::tests::cross_symbol_output_order_is_processing_order_and_not_globally_sorted`,
 and the E2E per-symbol anchor helpers.
 

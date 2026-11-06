@@ -34,11 +34,23 @@ The framework is additive. Historical verification records, commit messages, fix
 | [`../verification-2026-11-05-jh4-flush-sync.md`](../verification-2026-11-05-jh4-flush-sync.md) | JH-4 flush and sync failure evidence |
 | [`../verification-2026-11-05-jh4-recovery.md`](../verification-2026-11-05-jh4-recovery.md) | JH-4 recovery, crash and metadata failure evidence |
 | [`../verification-2026-11-05-jh4-enospc-report.md`](../verification-2026-11-05-jh4-enospc-report.md) | JH-4 directory failure, ENOSPC and report agreement evidence |
+| [`../verification-2026-11-06-matrix-test-references.md`](../verification-2026-11-06-matrix-test-references.md) | Requirement-matrix test-reference gate and corrected references |
 | [`reports/english-audit-2026-11-05-main-3da31e8.json`](reports/english-audit-2026-11-05-main-3da31e8.json) | Machine-readable baseline audit |
 | [`reports/project-language-audit-2026-11-02.json`](reports/project-language-audit-2026-11-02.json) | Historical machine-readable remote audit metadata |
 | [`ci/quality-gate.proposed.yml`](ci/quality-gate.proposed.yml) | Proposed non-blocking CI job; not installed |
 
 The audit tooling is in [`scripts/assurance/`](../../scripts/assurance/). The glossary is section 8 of the terminology standard.
+
+The requirement-to-test matrix is checked by
+[`scripts/check_matrix_tests.py`](../../scripts/check_matrix_tests.py). It
+resolves every test reference in the matrix evidence columns against the
+inventory reported by `cargo test --all-targets -- --list` and fails on an
+unresolved or ambiguous name:
+
+```bash
+python3 scripts/check_matrix_tests.py
+python3 -m unittest discover -s scripts -p 'test_*.py'
+```
 
 ## 3. Required engineering sequence
 
