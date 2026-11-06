@@ -14,17 +14,30 @@ documentation remains available at annotated tag
 - Python 3.14.8 for the repository gates.
 - Linux CI runs on `ubuntu-24.04` with the same pinned Rust toolchain.
 
-The last code-bearing commit is `423d510705e1ae77bbd37b9870dbe8a7a308127b`.
-The documentation commits `afd7a9e` and `cdf8312` do not change `src/`,
-`tests/`, `Cargo.toml`, `Cargo.lock`, or `sbe_schemas/`; the Rust tree is
-identical to `423d510`.
+## Commit provenance
+
+| Reference | Full SHA | Meaning |
+|---|---|---|
+| `423d510` | `423d510705e1ae77bbd37b9870dbe8a7a308127b` | Last code-bearing baseline (PR #14 merge) |
+| `6a0e9a7` | `6a0e9a77729614e80e0664044d6093c5df585d4d` | PR #15 tested head |
+| `0425da5` | `0425da50e4cc99a2bf7860546fae329a38d86a18` | PR #15 squash-merge commit on `main` |
+
+PR #15 contains three commits: `afd7a9e`, `cdf8312`, and `6a0e9a7`. `main`
+requires linear history, so the PR was squash-merged. The tested head and its
+parents are therefore not ancestors of `main`; the original commit history is
+available in [PR #15](https://github.com/kj111422/engineering-challenge-template/pull/15).
+The squash-merged tree at `0425da5` is byte-identical to the tested head
+`6a0e9a7`.
+
+The documentation commits did not change `src/`, `tests/`, `Cargo.toml`,
+`Cargo.lock`, or `sbe_schemas/`; the Rust tree remains identical to `423d510`.
 
 ## Current gate results
 
-The Rust commands were run at
-`cdf83122af0b13c5fae4315dfd6b809eb900a4b1`, whose Rust tree is identical to
-`423d510`. The documentation gates were run on the consolidation working tree
-immediately before its commit:
+The Rust commands were run on the PR #15 tree before the final documentation
+commit. That Rust tree is identical to `423d510` and to `0425da5`. The
+documentation gates were run on the consolidation working tree immediately
+before its commit:
 
 | Command | Result |
 |---|---|
@@ -59,7 +72,18 @@ CI and architecture evidence:
 - PR #14 head `fdf8873`: [Rust CI 42214714043](https://github.com/kj111422/engineering-challenge-template/actions/runs/42214714043), [architecture 42214714020](https://github.com/kj111422/engineering-challenge-template/actions/runs/42214714020).
 - PR #14 merge `423d510`: [Rust CI 42215032966](https://github.com/kj111422/engineering-challenge-template/actions/runs/42215032966), [architecture 42215032887](https://github.com/kj111422/engineering-challenge-template/actions/runs/42215032887).
 
-The architecture logs at those commits report 42 source files, 42 files
+PR #15, documentation restructuring:
+
+- Tested head `6a0e9a7`: [Rust CI 42217760852](https://github.com/kj111422/engineering-challenge-template/actions/runs/42217760852), [architecture 42217760920](https://github.com/kj111422/engineering-challenge-template/actions/runs/42217760920).
+- Squash merge `0425da5`: [Rust CI 42218633639](https://github.com/kj111422/engineering-challenge-template/actions/runs/42218633639), [architecture 42218633828](https://github.com/kj111422/engineering-challenge-template/actions/runs/42218633828).
+
+The PR #15 runs report 254 passed and 3 ignored, the matrix gate resolves 90
+references across 14 requirements with all 24 mandatory evidence tests present,
+and the architecture gate accepts 42 Rust source files, 42 reachable files, and
+3 diagrams. The squash-merge tree is byte-identical to the tested head, so the
+post-merge runs exercised the same content.
+
+The PR #13 and PR #14 architecture logs report 42 source files, 42 files
 reachable from crate roots, 255 attributed test functions at `3bd4834` and 257
 at `423d510`, and 9 structurally checked Mermaid diagrams. The current
 documentation tree reports 3 diagrams because the historical diagrams were
