@@ -25,6 +25,7 @@ SOURCE_RESPONSIBILITIES = {
     "src/fixed.rs": "fixed-point price/quantity parsing and checked arithmetic",
     "src/inspect.rs": "offline SBE capture inspection command",
     "src/journal.rs": "raw-frame journal writer, segment/manifest format, verification, ordered reading",
+    "src/journal/tests.rs": "journal unit tests for framing, checksums, durability, recovery, and failure handling",
     "src/latency.rs": "latency experiment orchestration and result output",
     "src/lib.rs": "library module exports and public entry points",
     "src/main.rs": "process entry point and collect/discover/replay/inspect/verify/latency dispatch",

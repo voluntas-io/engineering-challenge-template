@@ -32,12 +32,11 @@ The squash-merged tree at `0425da5` is byte-identical to the tested head
 The documentation commits did not change `src/`, `tests/`, `Cargo.toml`,
 `Cargo.lock`, or `sbe_schemas/`; the Rust tree remains identical to `423d510`.
 
-## Current gate results
+## Gate results
 
-The Rust commands were run on the PR #15 tree before the final documentation
-commit. That Rust tree is identical to `423d510` and to `0425da5`. The
-documentation gates were run on the consolidation working tree immediately
-before its commit:
+The Rust commands were run locally at `423d510` and re-run after the journal
+tests moved to `src/journal/tests.rs`; the production code is unchanged. The
+matrix and architecture gates were run on the same tree:
 
 | Command | Result |
 |---|---|
@@ -46,7 +45,7 @@ before its commit:
 | `cargo test --all-targets --locked` | **254 passed, 0 failed, 3 ignored**: 239 library, 1 binary, 12 mock-exchange E2E, 0 live, 2 replay |
 | `cargo test --doc --locked` | Pass: 0 documentation tests |
 | `cargo build --release --locked` | Pass |
-| `python3 scripts/check_architecture.py --check` | Pass: 42 Rust source files, 42 reachable from crate roots, 3 structurally checked Mermaid diagrams |
+| `python3 scripts/check_architecture.py --check` | Pass: 43 Rust source files, 43 reachable from crate roots, 3 structurally checked Mermaid diagrams |
 | `python3 scripts/check_matrix_tests.py` | Pass: 90 file-qualified references across 14 requirements; all 24 mandatory evidence tests present |
 | `python3 -m unittest discover -s scripts -p 'test_*.py'` | Pass: 24 gate tests |
 | `python3 -m unittest discover -s scripts/assurance -p 'test_*.py'` | Pass: 16 assurance-tool tests |

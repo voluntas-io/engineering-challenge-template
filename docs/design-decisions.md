@@ -193,9 +193,9 @@ disk-watermark policies are not implemented.
 **Implementation.** `src/journal.rs`, `src/session.rs`, `src/coordinator.rs`,
 `src/cli.rs` (`journal verify`, `journal recover`).
 
-**Verification.** `src/journal.rs::payload_bytes_survive_write_and_read`,
-`src/journal.rs::checksum_mismatch_and_corrupt_manifest_fail_verification`,
-`src/journal.rs::queue_saturation_then_shutdown_stays_failed`,
+**Verification.** `src/journal/tests.rs::payload_bytes_survive_write_and_read`,
+`src/journal/tests.rs::checksum_mismatch_and_corrupt_manifest_fail_verification`,
+`src/journal/tests.rs::queue_saturation_then_shutdown_stays_failed`,
 `tests/e2e_mock_exchange.rs::journal_accounts_for_every_delivered_payload`,
 `tests/e2e_mock_exchange.rs::journal_finalizes_and_verifies_on_graceful_shutdown`.
 
