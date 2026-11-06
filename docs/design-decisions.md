@@ -29,7 +29,7 @@ core decision depends on a venue feature.
 `src/exchange/polymarket/mod.rs`, `src/collector/state.rs` (`CoreConfig`).
 
 **Verification.** `src/exchange/mod.rs::configured_venue_capabilities_are_explicit`,
-`src/collector/state.rs::capabilities_are_not_derived_from_the_venue_name`.
+`src/collector/state/tests.rs::capabilities_are_not_derived_from_the_venue_name`.
 
 ## 2. Canonical market model
 
@@ -107,8 +107,8 @@ blocking work must stay outside it.
 **Implementation.** `src/collector/state.rs`, `src/session.rs`,
 `src/coordinator.rs`, `src/replay.rs`.
 
-**Verification.** `src/collector/state.rs::snapshot_anchors_delta_application_in_per_symbol_order`,
-`src/collector/state.rs::cross_symbol_output_order_is_processing_order_and_not_globally_sorted`,
+**Verification.** `src/collector/state/tests.rs::snapshot_anchors_delta_application_in_per_symbol_order`,
+`src/collector/state/tests.rs::cross_symbol_output_order_is_processing_order_and_not_globally_sorted`,
 `tests/replay_fixture.rs::sample_fixture_replays_through_the_same_core_and_decodes`.
 
 ## 5. Redundant source architecture
@@ -136,9 +136,9 @@ a claim of full-universe simultaneous subscription.
 **Implementation.** `src/capacity.rs`, `src/collector/state.rs`,
 `src/session.rs`.
 
-**Verification.** `src/collector/state.rs::clocked_shadow_replica_takes_over_after_source_loss`,
-`src/collector/state.rs::clocked_failover_anchors_resumed_deltas_and_preserves_receive_times`,
-`src/collector/state.rs::clockless_full_recovery_requires_acknowledged_fence_and_fresh_snapshot`,
+**Verification.** `src/collector/state/tests.rs::clocked_shadow_replica_takes_over_after_source_loss`,
+`src/collector/state/tests.rs::clocked_failover_anchors_resumed_deltas_and_preserves_receive_times`,
+`src/collector/state/tests.rs::clockless_full_recovery_requires_acknowledged_fence_and_fresh_snapshot`,
 `tests/e2e_mock_exchange.rs::single_socket_loss_fails_over_and_emits_anchoring_snapshot`.
 
 ## 6. SBE compatibility
@@ -224,8 +224,8 @@ buffer downstream and preserve file order.
 
 **Implementation.** `src/collector/state.rs`, `src/verify.rs`, `src/cli.rs`.
 
-**Verification.** `src/collector/state.rs::recovery_snapshot_before_ack_is_rejected_without_mutation`,
-`src/collector/state.rs::clockless_full_recovery_requires_acknowledged_fence_and_fresh_snapshot`,
+**Verification.** `src/collector/state/tests.rs::recovery_snapshot_before_ack_is_rejected_without_mutation`,
+`src/collector/state/tests.rs::clockless_full_recovery_requires_acknowledged_fence_and_fresh_snapshot`,
 `tests/e2e_mock_exchange.rs::full_outage_recovery_exposes_the_uncovered_interval`,
 `tests/e2e_mock_exchange.rs::negative_control_missing_update_is_detected_by_verify`,
 `src/verify.rs::reports_a_snapshot_that_disagrees_with_reconstructed_deltas`.
