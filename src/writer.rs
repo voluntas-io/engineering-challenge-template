@@ -1540,7 +1540,11 @@ mod tests {
     async fn rotation_finalizes_independently_verifiable_segments() {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("rotated.sbe");
-        let mut writer_options = options(output.to_str().unwrap(), 1024, 16, true, false);
+        // The queue must hold the full 100-message test burst plus the
+        // shutdown command. This test isolates rotation from queue
+        // backpressure; saturated_send_times_out_without_queue_side_effects
+        // covers the saturated-queue timeout.
+        let mut writer_options = options(output.to_str().unwrap(), 1024, 128, true, false);
         writer_options.rotate_bytes = 1024;
         let writer = WriterHandle::start(writer_options).unwrap();
         for index in 0..100 {
