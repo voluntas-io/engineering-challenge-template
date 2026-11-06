@@ -139,7 +139,7 @@ a claim of full-universe simultaneous subscription.
 **Verification.** `src/collector/state/tests.rs::clocked_shadow_replica_takes_over_after_source_loss`,
 `src/collector/state/tests.rs::clocked_failover_anchors_resumed_deltas_and_preserves_receive_times`,
 `src/collector/state/tests.rs::clockless_full_recovery_requires_acknowledged_fence_and_fresh_snapshot`,
-`tests/e2e_mock_exchange.rs::single_socket_loss_fails_over_and_emits_anchoring_snapshot`.
+`tests/e2e_mock_exchange/failover.rs::single_socket_loss_fails_over_and_emits_anchoring_snapshot`.
 
 ## 6. SBE compatibility
 
@@ -226,6 +226,6 @@ buffer downstream and preserve file order.
 
 **Verification.** `src/collector/state/tests.rs::recovery_snapshot_before_ack_is_rejected_without_mutation`,
 `src/collector/state/tests.rs::clockless_full_recovery_requires_acknowledged_fence_and_fresh_snapshot`,
-`tests/e2e_mock_exchange.rs::full_outage_recovery_exposes_the_uncovered_interval`,
+`tests/e2e_mock_exchange/failover.rs::full_outage_recovery_exposes_the_uncovered_interval`,
 `tests/e2e_mock_exchange.rs::negative_control_missing_update_is_detected_by_verify`,
 `src/verify.rs::reports_a_snapshot_that_disagrees_with_reconstructed_deltas`.
