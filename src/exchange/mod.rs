@@ -9,8 +9,41 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    capacity::count_selected_markets, model::MarketInfo, session::SessionFactory, time::now_us,
+    capacity::count_selected_markets, config::ExchangeKind, model::MarketInfo,
+    session::SessionFactory, time::now_us,
 };
+
+/// Venue features that the exchange adapter reports to the collector core.
+///
+/// The core consumes these values instead of identifying a venue by name, so
+/// adding an exchange requires a new adapter and capability declaration, not a
+/// change to the state machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ExchangeCapabilities {
+    /// The venue supplies a sequence number or clock that can verify backup
+    /// book freshness and quantify a recovery gap.
+    pub has_sequence_clock: bool,
+}
+
+impl ExchangeCapabilities {
+    #[must_use]
+    pub const fn new(has_sequence_clock: bool) -> Self {
+        Self { has_sequence_clock }
+    }
+}
+
+/// Capability declaration for a configured venue.
+///
+/// The coordinator obtains capabilities from the constructed adapter. Replay
+/// has no adapter, so this mapping is the composition-root equivalent for the
+/// selected configuration.
+#[must_use]
+pub fn capabilities_for(kind: ExchangeKind) -> ExchangeCapabilities {
+    match kind {
+        ExchangeKind::Kalshi => ExchangeCapabilities::new(true),
+        ExchangeKind::Polymarket => ExchangeCapabilities::new(false),
+    }
+}
 
 /// Telemetry for one complete discovery round.
 ///
@@ -45,6 +78,9 @@ pub trait Exchange: Send + Sync + 'static {
     /// Human-readable environment (`production`, `demo`, or `public`).
     fn environment(&self) -> &'static str;
 
+    /// Features the collector core may rely on for this venue.
+    fn capabilities(&self) -> ExchangeCapabilities;
+
     /// Fetch the current live, non-MVE market set. Implementations cap the
     /// result when `max_markets` is non-zero.
     async fn discover_markets(&self, max_markets: usize) -> anyhow::Result<Vec<MarketInfo>>;
@@ -78,3 +114,14 @@ pub trait Exchange: Send + Sync + 'static {
 
 pub use kalshi::{KalshiExchange, KalshiSessionFactory};
 pub use polymarket::{PolymarketExchange, PolymarketSessionFactory};
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_venue_capabilities_are_explicit() {
+        assert!(capabilities_for(ExchangeKind::Kalshi).has_sequence_clock);
+        assert!(!capabilities_for(ExchangeKind::Polymarket).has_sequence_clock);
+    }
+}

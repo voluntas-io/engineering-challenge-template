@@ -44,7 +44,7 @@ SOURCE_RESPONSIBILITIES = {
     "src/persistence.rs": "latest-wins metadata/catalog background writer and lifecycle status",
     "src/collector/mod.rs": "collector core module boundary",
     "src/collector/state.rs": "serialized per-symbol/source state machine, discovery and failover decisions",
-    "src/exchange/mod.rs": "Exchange and adapter-independent session factory abstraction",
+    "src/exchange/mod.rs": "exchange capabilities and adapter-independent session factory abstraction",
     "src/exchange/kalshi/auth.rs": "Kalshi request signing and auth header construction",
     "src/exchange/kalshi/codec.rs": "Kalshi wire-frame parsing and normalized events",
     "src/exchange/kalshi/discovery.rs": "Kalshi REST pagination, market eligibility and metadata conversion",

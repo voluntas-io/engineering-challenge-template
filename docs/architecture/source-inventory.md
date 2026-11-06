@@ -19,7 +19,7 @@ Reachability means a file is referenced through Rust module declarations; separa
 | `src/exchange/kalshi/discovery.rs` | Kalshi REST pagination, market eligibility and metadata conversion | reachable from library, binary, or build-script root |
 | `src/exchange/kalshi/mod.rs` | Kalshi adapter construction and Exchange implementation | reachable from library, binary, or build-script root |
 | `src/exchange/kalshi/session.rs` | Kalshi websocket protocol, subscriptions, acknowledgements and sequence recovery | reachable from library, binary, or build-script root |
-| `src/exchange/mod.rs` | Exchange and adapter-independent session factory abstraction | reachable from library, binary, or build-script root |
+| `src/exchange/mod.rs` | exchange capabilities and adapter-independent session factory abstraction | reachable from library, binary, or build-script root |
 | `src/exchange/polymarket/codec.rs` | Polymarket CLOB payload validation and normalized events | reachable from library, binary, or build-script root |
 | `src/exchange/polymarket/discovery.rs` | Gamma keyset pagination, version-aware identifiers and outcome expansion | reachable from library, binary, or build-script root |
 | `src/exchange/polymarket/mod.rs` | Polymarket adapter construction and Exchange implementation | reachable from library, binary, or build-script root |

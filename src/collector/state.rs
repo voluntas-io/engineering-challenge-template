@@ -14,7 +14,8 @@ use tracing::{debug, error, warn};
 
 use crate::{
     Side,
-    config::{ExchangeKind, Settings},
+    config::Settings,
+    exchange::ExchangeCapabilities,
     fixed::SCALE,
     metrics::CollectorStats,
     model::{
@@ -40,13 +41,16 @@ pub struct CoreConfig {
     pub probe_interval_us: i64,
     pub max_probes: u32,
     pub crossed_grace_us: i64,
-    /// Whether the exchange provides a sequence number or clock that can
-    /// be used to verify backup book freshness. True for Kalshi, false for Polymarket.
-    pub exchange_has_clock: bool,
+    /// Venue capabilities supplied by the exchange adapter.
+    pub capabilities: ExchangeCapabilities,
 }
 
 impl CoreConfig {
-    pub fn from_settings(settings: &Settings, shard_count: usize) -> anyhow::Result<Self> {
+    pub fn from_settings(
+        settings: &Settings,
+        shard_count: usize,
+        capabilities: ExchangeCapabilities,
+    ) -> anyhow::Result<Self> {
         anyhow::ensure!(shard_count >= 1, "shard count must be >= 1");
         anyhow::ensure!(
             settings.collector.replicas >= 1,
@@ -58,7 +62,6 @@ impl CoreConfig {
                 .checked_mul(1_000_000)
                 .context("duration overflows microseconds")
         };
-        let exchange_has_clock = settings.exchange == ExchangeKind::Kalshi;
         Ok(Self {
             exchange: settings.exchange.to_string(),
             shard_count,
@@ -68,7 +71,7 @@ impl CoreConfig {
             probe_interval_us: seconds_to_us(settings.collector.probe_interval_secs)?,
             max_probes: settings.collector.max_probes,
             crossed_grace_us: 2_000_000,
-            exchange_has_clock,
+            capabilities,
         })
     }
 }
@@ -723,7 +726,10 @@ impl CollectorCore {
         let promotes = was_active.is_none() && was_emitted;
         let repairs_active = was_active == Some(source)
             && !matches!(state.continuity, crate::model::ContinuityState::Live);
-        if !self.config.exchange_has_clock && (promotes || repairs_active) && !recovery_fence_ok {
+        if !self.config.capabilities.has_sequence_clock
+            && (promotes || repairs_active)
+            && !recovery_fence_ok
+        {
             self.stats.rejected_recovery_snapshots =
                 self.stats.rejected_recovery_snapshots.saturating_add(1);
             debug!(
@@ -1098,7 +1104,7 @@ impl CollectorCore {
             native_symbols
         };
 
-        let quantifiable = self.config.exchange_has_clock;
+        let quantifiable = self.config.capabilities.has_sequence_clock;
         let mut outputs = Vec::new();
         let mut retry_shadow = Vec::new();
         for native in affected {
@@ -1170,7 +1176,7 @@ impl CollectorCore {
             return Vec::new();
         }
 
-        let quantifiable = self.config.exchange_has_clock;
+        let quantifiable = self.config.capabilities.has_sequence_clock;
         let mut affected = Vec::new();
         for (native, state) in &mut self.markets {
             if state.shard != source.shard as usize {
@@ -1205,7 +1211,7 @@ impl CollectorCore {
         let probe_spacing = self.config.probe_interval_us;
         let max_probes = self.config.max_probes;
         let crossed_grace = self.config.crossed_grace_us;
-        let quantifiable = self.config.exchange_has_clock;
+        let quantifiable = self.config.capabilities.has_sequence_clock;
         let mut outputs = Vec::new();
         let mut probes: Vec<(SourceId, String)> = Vec::new();
         let mut reconnects: Vec<(SourceId, String)> = Vec::new();
@@ -1477,7 +1483,7 @@ impl CollectorCore {
         };
         let previous_active = state.active;
         let was_emitted = state.emitted_any;
-        let backup = best_backup(state, statuses, self.config.exchange_has_clock);
+        let backup = best_backup(state, statuses, self.config.capabilities.has_sequence_clock);
         let Some(backup) = backup else {
             state.active = None;
             let candidates: Vec<(SourceId, bool)> = state
@@ -1520,7 +1526,8 @@ impl CollectorCore {
         state.crossed_since_us = None;
         // A direct clock-based promotion only exists for venues with an
         // exchange clock. Clockless venues always wait for a fresh snapshot.
-        if self.config.exchange_has_clock && (was_emitted || previous_active.is_some()) {
+        if self.config.capabilities.has_sequence_clock && (was_emitted || previous_active.is_some())
+        {
             state.resolve_incident(now_us);
         }
         let cancel_pending = self
@@ -1569,12 +1576,12 @@ fn source_healthy(statuses: &BTreeMap<SourceId, SourceStatus>, source: SourceId)
 fn best_backup(
     state: &MarketState,
     statuses: &BTreeMap<SourceId, SourceStatus>,
-    exchange_has_clock: bool,
+    has_sequence_clock: bool,
 ) -> Option<SourceId> {
     // A clockless venue cannot prove that a shadow book is newer than the
     // published state. Promotion always requires a fresh exchange snapshot
     // accepted against an explicit recovery generation.
-    if !exchange_has_clock {
+    if !has_sequence_clock {
         return None;
     }
     let emitted_clock = state.emitted_clock;
@@ -1712,6 +1719,7 @@ fn timestamp_or(timestamp_us: i64, fallback: DateTime<Utc>) -> DateTime<Utc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::ExchangeKind;
     use crate::metrics::{
         CatalogHealth, MetricsRegistry, ReadinessPolicy, RuntimeStatus, WriterStats,
     };
@@ -1738,16 +1746,45 @@ mod tests {
 
     fn core() -> CollectorCore {
         CollectorCore::new(
-            CoreConfig::from_settings(&settings_for(ExchangeKind::Polymarket), 1).unwrap(),
+            CoreConfig::from_settings(
+                &settings_for(ExchangeKind::Polymarket),
+                1,
+                ExchangeCapabilities::new(false),
+            )
+            .unwrap(),
         )
         .unwrap()
     }
 
     fn clocked_core() -> CollectorCore {
         CollectorCore::new(
-            CoreConfig::from_settings(&settings_for(ExchangeKind::Kalshi), 1).unwrap(),
+            CoreConfig::from_settings(
+                &settings_for(ExchangeKind::Kalshi),
+                1,
+                ExchangeCapabilities::new(true),
+            )
+            .unwrap(),
         )
         .unwrap()
+    }
+
+    #[test]
+    fn capabilities_are_not_derived_from_the_venue_name() {
+        let unclocked_kalshi = CoreConfig::from_settings(
+            &settings_for(ExchangeKind::Kalshi),
+            1,
+            ExchangeCapabilities::new(false),
+        )
+        .unwrap();
+        assert!(!unclocked_kalshi.capabilities.has_sequence_clock);
+
+        let clocked_polymarket = CoreConfig::from_settings(
+            &settings_for(ExchangeKind::Polymarket),
+            1,
+            ExchangeCapabilities::new(true),
+        )
+        .unwrap();
+        assert!(clocked_polymarket.capabilities.has_sequence_clock);
     }
 
     fn market(native: &str) -> MarketInfo {
@@ -2493,7 +2530,7 @@ mod tests {
     #[test]
     fn source_disconnect_opens_one_unquantifiable_incident_and_blocks_deltas() {
         let mut core = core();
-        assert!(!core.config.exchange_has_clock);
+        assert!(!core.config.capabilities.has_sequence_clock);
         discover_one(&mut core);
         connect_sources(&mut core);
         core.handle_event(SOURCE_A, snapshot_event("A", 400_000, 600_000, 0));

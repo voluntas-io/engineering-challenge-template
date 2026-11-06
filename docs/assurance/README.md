@@ -35,6 +35,7 @@ The framework is additive. Historical verification records, commit messages, fix
 | [`../verification-2026-11-05-jh4-recovery.md`](../verification-2026-11-05-jh4-recovery.md) | JH-4 recovery, crash and metadata failure evidence |
 | [`../verification-2026-11-05-jh4-enospc-report.md`](../verification-2026-11-05-jh4-enospc-report.md) | JH-4 directory failure, ENOSPC and report agreement evidence |
 | [`../verification-2026-11-06-matrix-test-references.md`](../verification-2026-11-06-matrix-test-references.md) | Requirement-matrix test-reference gate and corrected references |
+| [`../verification-2026-11-06-exchange-capabilities.md`](../verification-2026-11-06-exchange-capabilities.md) | Exchange capability boundary and venue-neutral core |
 | [`reports/english-audit-2026-11-05-main-3da31e8.json`](reports/english-audit-2026-11-05-main-3da31e8.json) | Machine-readable baseline audit |
 | [`reports/project-language-audit-2026-11-02.json`](reports/project-language-audit-2026-11-02.json) | Historical machine-readable remote audit metadata |
 | [`ci/quality-gate.proposed.yml`](ci/quality-gate.proposed.yml) | Proposed non-blocking CI job; not installed |

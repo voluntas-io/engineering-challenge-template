@@ -14,8 +14,8 @@ pub use auth::KalshiAuth;
 pub use session::{KalshiExchange, KalshiSessionFactory};
 
 use crate::{
-    config::{KalshiSettings, NetworkSettings},
-    exchange::{DiscoveryResult, Exchange},
+    config::{ExchangeKind, KalshiSettings, NetworkSettings},
+    exchange::{DiscoveryResult, Exchange, ExchangeCapabilities, capabilities_for},
     model::MarketInfo,
     session::SessionFactory,
 };
@@ -31,6 +31,10 @@ impl Exchange for KalshiExchange {
             crate::config::KalshiEnvironment::Demo => "demo",
             crate::config::KalshiEnvironment::Production => "production",
         }
+    }
+
+    fn capabilities(&self) -> ExchangeCapabilities {
+        capabilities_for(ExchangeKind::Kalshi)
     }
 
     async fn discover_markets(&self, max_markets: usize) -> anyhow::Result<Vec<MarketInfo>> {

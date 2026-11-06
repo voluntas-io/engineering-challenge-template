@@ -12,8 +12,8 @@ use reqwest::Client;
 pub use session::{PolymarketExchange, PolymarketSessionFactory};
 
 use crate::{
-    config::{NetworkSettings, PolymarketSettings},
-    exchange::{DiscoveryResult, Exchange},
+    config::{ExchangeKind, NetworkSettings, PolymarketSettings},
+    exchange::{DiscoveryResult, Exchange, ExchangeCapabilities, capabilities_for},
     model::MarketInfo,
     session::SessionFactory,
 };
@@ -26,6 +26,10 @@ impl Exchange for PolymarketExchange {
 
     fn environment(&self) -> &'static str {
         "public"
+    }
+
+    fn capabilities(&self) -> ExchangeCapabilities {
+        capabilities_for(ExchangeKind::Polymarket)
     }
 
     async fn discover_markets(&self, max_markets: usize) -> anyhow::Result<Vec<MarketInfo>> {

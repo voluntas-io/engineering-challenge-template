@@ -297,7 +297,7 @@ where
         capacity::plan(&settings, &initial_markets).context("planning collector capacity")?;
     let shard_count = capacity.shards;
     let replica_count = settings.collector.replicas;
-    let core_config = CoreConfig::from_settings(&settings, shard_count)?;
+    let core_config = CoreConfig::from_settings(&settings, shard_count, exchange.capabilities())?;
     let mut core = CollectorCore::new(core_config)?;
     // The initial discovery cannot produce removal snapshots, but applying it
     // here establishes shard assignments before workers are spawned.
@@ -1004,7 +1004,7 @@ mod tests {
     use super::*;
     use crate::{
         config::CatalogMode,
-        exchange::DiscoveryStats,
+        exchange::{DiscoveryStats, ExchangeCapabilities},
         model::MarketInfo,
         session::{MarketDataSession, SessionFactory},
     };
@@ -1058,6 +1058,10 @@ mod tests {
 
         fn environment(&self) -> &'static str {
             "public"
+        }
+
+        fn capabilities(&self) -> ExchangeCapabilities {
+            ExchangeCapabilities::new(false)
         }
 
         async fn discover_markets(&self, _max_markets: usize) -> anyhow::Result<Vec<MarketInfo>> {

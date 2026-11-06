@@ -136,7 +136,11 @@ pub fn run(settings: Settings, input: &Path) -> anyhow::Result<RunReport> {
     let mut replay_settings = settings.clone();
     replay_settings.collector.shards = 1;
     replay_settings.collector.replicas = replay_settings.collector.replicas.max(2);
-    let core_config = CoreConfig::from_settings(&replay_settings, 1)?;
+    let core_config = CoreConfig::from_settings(
+        &replay_settings,
+        1,
+        crate::exchange::capabilities_for(replay_settings.exchange),
+    )?;
     let mut core = CollectorCore::new(core_config)?;
     let mut writer = DirectWriter::create(crate::writer::WriterOptions::from_settings(&settings))?;
 

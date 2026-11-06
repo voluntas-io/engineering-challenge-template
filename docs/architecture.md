@@ -130,6 +130,8 @@ flowchart TD
 
 The shared contract is `MarketDataSession` + `SessionFactory` in `session.rs`; `run_worker` owns retry, control handling, status reporting and shutdown behavior. The adapter is responsible for venue protocol details. Kalshi signs authenticated requests, reconciles subscriptions, tracks per-subscription sequence numbers and treats a sequence gap as a recovery event. Polymarket uses public CLOB market messages; its decoder treats `book` as a snapshot and `price_change` sizes as absolute level sizes. Polymarket has no exchange sequence number in this adapter, so protocol faults are recovered by reconnecting/resubscribing to obtain fresh books.
 
+The collector core does not inspect the venue name. Each adapter reports `ExchangeCapabilities`, including whether a sequence clock is available, and the core uses that value for backup freshness and gap quantification. The coordinator reads the capability from the constructed adapter; replay uses the same mapping for its configured venue.
+
 The local receive timestamp is captured on frame read before decoding and carried in `EventMeta`. Do not infer a global exchange chronology from it: the writer preserves coordinator processing order, and cross-symbol timestamps can regress.
 
 ## 4. Book state, shadow replicas, and recovery
