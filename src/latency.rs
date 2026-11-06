@@ -183,8 +183,9 @@ pub async fn run(
     let mut skew = SkewTracker::new(replica_count);
     let settle_secs = if replica_count > 1 { SETTLE_SECS } else { 0 };
     // The settle window discards startup frames, but the
-    // first-frame timing is setup evidence and must survive it.
-    discard_startup_frames(&mut frame_rx, settle_secs, &mut first_frames).await;
+    // first-frame timing is setup evidence and must survive it. Replica
+    // transport errors during the window are retained.
+    errors.extend(discard_startup_frames(&mut frame_rx, settle_secs, &mut first_frames).await);
     let measurement_started_us =
         now_us().context("reading wall clock at the start of latency measurement")?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(duration_secs.max(1));
@@ -360,25 +361,35 @@ async fn discard_startup_frames(
     frames: &mut mpsc::Receiver<ReplicaEvent>,
     settle_secs: u64,
     first_frames: &mut [Option<f64>],
-) {
+) -> Vec<String> {
+    let mut errors = Vec::new();
     if settle_secs == 0 {
-        return;
+        return errors;
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(settle_secs);
     while let Ok(Some(event)) = tokio::time::timeout_at(deadline, frames.recv()).await {
-        if let ReplicaEvent::FirstFrame(replica, elapsed_ms) = event
-            && let Some(slot) = first_frames.get_mut(replica)
-        {
-            slot.get_or_insert(elapsed_ms);
+        match event {
+            ReplicaEvent::FirstFrame(replica, elapsed_ms) => {
+                if let Some(slot) = first_frames.get_mut(replica) {
+                    slot.get_or_insert(elapsed_ms);
+                }
+            }
+            ReplicaEvent::Frame(_, Err(error)) => errors.push(error),
+            ReplicaEvent::Frame(_, Ok(_)) => {}
         }
     }
     while let Ok(event) = frames.try_recv() {
-        if let ReplicaEvent::FirstFrame(replica, elapsed_ms) = event
-            && let Some(slot) = first_frames.get_mut(replica)
-        {
-            slot.get_or_insert(elapsed_ms);
+        match event {
+            ReplicaEvent::FirstFrame(replica, elapsed_ms) => {
+                if let Some(slot) = first_frames.get_mut(replica) {
+                    slot.get_or_insert(elapsed_ms);
+                }
+            }
+            ReplicaEvent::Frame(_, Err(error)) => errors.push(error),
+            ReplicaEvent::Frame(_, Ok(_)) => {}
         }
     }
+    errors
 }
 
 async fn send_frame(
@@ -683,5 +694,29 @@ mod tests {
         assert_eq!(tracker.matched, 0);
         assert!(tracker.samples.is_empty());
         assert!(tracker.pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn discard_startup_frames_retains_replica_errors() {
+        let (tx, mut rx) = mpsc::channel::<ReplicaEvent>(16);
+        tx.send(ReplicaEvent::FirstFrame(0, 42.0)).await.unwrap();
+        tx.send(ReplicaEvent::Frame(0, Ok(SessionFrame::idle(10))))
+            .await
+            .unwrap();
+        tx.send(ReplicaEvent::Frame(
+            0,
+            Err("websocket read failed: boom".to_owned()),
+        ))
+        .await
+        .unwrap();
+        drop(tx);
+
+        let mut first_frames = vec![None; 1];
+        let errors = discard_startup_frames(&mut rx, 1, &mut first_frames).await;
+
+        assert_eq!(first_frames, vec![Some(42.0)]);
+        assert_eq!(errors, vec!["websocket read failed: boom".to_owned()]);
+        // Startup measurement frames are discarded.
+        assert!(rx.recv().await.is_none());
     }
 }
