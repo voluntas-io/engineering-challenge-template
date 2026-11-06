@@ -113,8 +113,6 @@ impl KalshiExchange {
         &self,
         max_markets: usize,
     ) -> anyhow::Result<DiscoveryResult> {
-        let started = std::time::Instant::now();
-        let started_at_us = now_us().unwrap_or(0);
         let base = Url::parse(&format!(
             "{}/",
             self.settings()
@@ -123,6 +121,17 @@ impl KalshiExchange {
                 .trim_end_matches('/')
         ))
         .context("invalid Kalshi REST base URL")?;
+
+        self.fetch_markets_from(&base, max_markets).await
+    }
+
+    async fn fetch_markets_from(
+        &self,
+        base: &Url,
+        max_markets: usize,
+    ) -> anyhow::Result<DiscoveryResult> {
+        let started = std::time::Instant::now();
+        let started_at_us = now_us().unwrap_or(0);
         let mut cursor: Option<String> = None;
         let mut seen_cursors = BTreeSet::new();
         let mut markets = Vec::new();
@@ -157,6 +166,11 @@ impl KalshiExchange {
             );
             let page_cursor = page.cursor;
             convert_kalshi_page(page.markets, max_markets, &mut markets, &mut skipped)?;
+
+            if max_markets != 0 && markets.len() >= max_markets {
+                break;
+            }
+
             let Some(next) = page_cursor.filter(|cursor| !cursor.is_empty()) else {
                 break;
             };
@@ -369,225 +383,4 @@ fn parse_price_ranges(ranges: Option<&[RawPriceRange]>) -> anyhow::Result<Vec<Pr
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn raw() -> RawMarket {
-        RawMarket {
-            ticker: "KXTEST-26-T1".to_owned(),
-            event_ticker: Some("KXTEST-26".to_owned()),
-            title: Some("Test market".to_owned()),
-            yes_sub_title: None,
-            status: Some("active".to_owned()),
-            market_type: Some("binary".to_owned()),
-            close_time: Some("2026-10-24T00:00:00Z".to_owned()),
-            mve_collection_ticker: None,
-            mve_selected_legs: None,
-            price_ranges: Some(vec![RawPriceRange {
-                start: Some("0.00".to_owned()),
-                end: Some("1.00".to_owned()),
-                step: Some("0.0100".to_owned()),
-            }]),
-            price_level_structure: Some("linear_cent".to_owned()),
-        }
-    }
-
-    #[test]
-    fn converts_active_non_mve_market() {
-        let info = raw().into_market().unwrap().unwrap();
-        assert_eq!(info.symbol, "KXTEST-26-T1");
-        assert_eq!(info.tick_size_us, Some(10_000));
-        assert_eq!(info.exchange_market_id.as_deref(), Some("KXTEST-26"));
-    }
-
-    #[test]
-    fn rejects_inactive_and_mve_markets() {
-        let mut market = raw();
-        market.status = Some("closed".to_owned());
-        assert!(market.into_market().unwrap().is_none());
-
-        let mut market = raw();
-        market.mve_collection_ticker = Some("KXMVECROSS".to_owned());
-        assert!(market.into_market().unwrap().is_none());
-
-        let mut market = raw();
-        market.mve_selected_legs = Some(serde_json::json!([{"market":"X"}]));
-        assert!(market.into_market().unwrap().is_none());
-    }
-
-    #[test]
-    fn preserves_tapered_price_ranges_instead_of_label_fallback() {
-        let mut market = raw();
-        market.price_level_structure = Some("tapered_deci_cent".to_owned());
-        market.price_ranges = Some(vec![
-            RawPriceRange {
-                start: Some("0.00".to_owned()),
-                end: Some("0.10".to_owned()),
-                step: Some("0.001".to_owned()),
-            },
-            RawPriceRange {
-                start: Some("0.10".to_owned()),
-                end: Some("0.90".to_owned()),
-                step: Some("0.01".to_owned()),
-            },
-            RawPriceRange {
-                start: Some("0.90".to_owned()),
-                end: Some("1.00".to_owned()),
-                step: Some("0.001".to_owned()),
-            },
-        ]);
-        let info = market.into_market().unwrap().unwrap();
-        assert_eq!(info.tick_size_us, Some(1_000));
-        assert_eq!(info.price_ranges.len(), 3);
-        assert_eq!(info.price_ranges[1].step_us, 10_000);
-        assert_eq!(
-            info.price_level_structure.as_deref(),
-            Some("tapered_deci_cent")
-        );
-    }
-
-    #[test]
-    fn does_not_guess_tick_size_without_price_ranges() {
-        let mut market = raw();
-        market.price_ranges = None;
-        market.price_level_structure = Some("center_whole_edge_half_cent".to_owned());
-        let info = market.into_market().unwrap().unwrap();
-        assert_eq!(info.tick_size_us, None);
-        assert!(info.price_ranges.is_empty());
-    }
-
-    #[test]
-    fn rejects_malformed_price_ranges() {
-        let mut market = raw();
-        market.price_ranges = Some(vec![RawPriceRange {
-            start: Some("0.00".to_owned()),
-            end: Some("1.00".to_owned()),
-            step: None,
-        }]);
-        assert!(market.into_market().is_err());
-    }
-
-    #[test]
-    fn one_malformed_record_does_not_abort_the_page() {
-        let mut valid = raw();
-        valid.ticker = "KXVALID-26-T1".to_owned();
-        let mut malformed = raw();
-        malformed.ticker = String::new();
-        let mut markets = Vec::new();
-        let mut skipped = 0u64;
-        convert_kalshi_page(vec![malformed, valid], 0, &mut markets, &mut skipped).unwrap();
-        assert_eq!(markets.len(), 1);
-        assert_eq!(markets[0].symbol, "KXVALID-26-T1");
-        assert_eq!(skipped, 1);
-    }
-
-    #[test]
-    fn filtered_records_are_not_failures() {
-        let mut inactive = raw();
-        inactive.status = Some("settled".to_owned());
-        let mut markets = Vec::new();
-        let mut skipped = 0u64;
-        convert_kalshi_page(vec![inactive], 0, &mut markets, &mut skipped).unwrap();
-        assert!(markets.is_empty());
-        assert_eq!(skipped, 0);
-    }
-
-    #[test]
-    fn a_page_of_only_malformed_records_fails_the_round() {
-        let mut malformed_a = raw();
-        malformed_a.status = None;
-        let mut malformed_b = raw();
-        malformed_b.price_ranges = Some(vec![RawPriceRange {
-            start: None,
-            end: None,
-            step: None,
-        }]);
-        let mut markets = Vec::new();
-        let mut skipped = 0u64;
-        let error = convert_kalshi_page(
-            vec![malformed_a, malformed_b],
-            0,
-            &mut markets,
-            &mut skipped,
-        )
-        .unwrap_err();
-        assert!(
-            error.to_string().contains("failed to decode"),
-            "unexpected error: {error:#}"
-        );
-        assert!(markets.is_empty());
-        assert_eq!(skipped, 2);
-    }
-
-    #[test]
-    fn retry_policy_covers_timeouts_rate_limits_and_server_errors() {
-        assert!(retryable_status(408));
-        assert!(retryable_status(429));
-        assert!(retryable_status(503));
-        assert!(!retryable_status(400));
-        assert!(!retryable_status(404));
-        assert_eq!(retry_delay(0, Some(2)), std::time::Duration::from_secs(2));
-        assert_eq!(
-            retry_delay(0, Some(600)),
-            std::time::Duration::from_secs(30),
-            "a server hint must not stall discovery indefinitely"
-        );
-        assert_eq!(
-            retry_delay(1, None),
-            std::time::Duration::from_millis(1_000)
-        );
-    }
-
-    #[tokio::test]
-    async fn fetch_page_retries_408_and_honors_retry_after() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicUsize, Ordering},
-        };
-        use tokio::{
-            io::{AsyncReadExt, AsyncWriteExt},
-            net::TcpListener,
-        };
-
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let requests = Arc::new(AtomicUsize::new(0));
-        let observed = Arc::clone(&requests);
-        tokio::spawn(async move {
-            for response in [
-                "HTTP/1.1 408 Request Timeout\r\nRetry-After: 0\r\nContent-Length: 0\r\n\
-                 Connection: close\r\n\r\n"
-                    .to_owned(),
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\
-                 Content-Length: 28\r\nConnection: close\r\n\r\n\
-                 {\"markets\":[],\"cursor\":null}"
-                    .to_owned(),
-            ] {
-                let Ok((mut socket, _)) = listener.accept().await else {
-                    return;
-                };
-                let mut buffer = [0u8; 4096];
-                let _ = socket.read(&mut buffer).await;
-                observed.fetch_add(1, Ordering::SeqCst);
-                let _ = socket.write_all(response.as_bytes()).await;
-                let _ = socket.shutdown().await;
-            }
-        });
-
-        let exchange = KalshiExchange::new(
-            crate::config::KalshiSettings::default(),
-            crate::config::NetworkSettings::default(),
-            false,
-        )
-        .unwrap();
-        let url = Url::parse(&format!("http://{address}/markets")).unwrap();
-        let (page, retries) =
-            tokio::time::timeout(std::time::Duration::from_secs(5), exchange.fetch_page(&url))
-                .await
-                .expect("408 retry timed out")
-                .unwrap();
-        assert!(page.markets.is_empty());
-        assert_eq!(retries, 1);
-        assert_eq!(requests.load(Ordering::SeqCst), 2);
-    }
-}
+mod tests;

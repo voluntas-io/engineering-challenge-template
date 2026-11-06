@@ -50,6 +50,7 @@ SOURCE_RESPONSIBILITIES = {
     "src/exchange/kalshi/auth.rs": "Kalshi request signing and auth header construction",
     "src/exchange/kalshi/codec.rs": "Kalshi wire-frame parsing and normalized events",
     "src/exchange/kalshi/discovery.rs": "Kalshi REST pagination, market eligibility and metadata conversion",
+    "src/exchange/kalshi/discovery/tests.rs": "Kalshi REST discovery tests for pagination, eligibility, caps, retries, and duplicate detection",
     "src/exchange/kalshi/mod.rs": "Kalshi adapter construction and Exchange implementation",
     "src/exchange/kalshi/session.rs": "Kalshi websocket protocol, subscriptions, acknowledgements and sequence recovery",
     "src/exchange/polymarket/codec.rs": "Polymarket CLOB payload validation and normalized events",
