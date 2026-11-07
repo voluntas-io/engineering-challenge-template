@@ -5,17 +5,10 @@
     clippy::print_stdout
 )]
 
-use std::{
-    collections::BTreeSet,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, Ordering},
-    },
-    time::Duration,
-};
+use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use tokio::sync::{Mutex, broadcast, mpsc, watch};
 
 use engineering_challenge::{
     journal::{
@@ -70,7 +63,7 @@ struct MockSession {
     rx: Arc<Mutex<mpsc::Receiver<SessionFrame>>>,
     tx: mpsc::Sender<SessionFrame>,
     subscriptions: Arc<Mutex<BTreeSet<String>>>,
-    closed: Arc<AtomicBool>,
+    closed: watch::Sender<bool>,
     snapshot_on_recover: Option<SessionFrame>,
 }
 
@@ -113,7 +106,7 @@ impl MarketDataSession for MockSession {
     }
 
     async fn close(&mut self) {
-        self.closed.store(true, Ordering::SeqCst);
+        self.closed.send_replace(true);
     }
 }
 
@@ -141,20 +134,20 @@ fn make_session(
 ) -> (
     MockSession,
     mpsc::Sender<SessionFrame>,
-    Arc<AtomicBool>,
+    watch::Receiver<bool>,
     Arc<Mutex<BTreeSet<String>>>,
 ) {
     let (tx, rx) = mpsc::channel::<SessionFrame>(64);
-    let closed = Arc::new(AtomicBool::new(false));
+    let (closed, closed_rx) = watch::channel(false);
     let subscriptions = Arc::new(Mutex::new(BTreeSet::new()));
     let session = MockSession {
         rx: Arc::new(Mutex::new(rx)),
         tx: tx.clone(),
         subscriptions: Arc::clone(&subscriptions),
-        closed: Arc::clone(&closed),
+        closed,
         snapshot_on_recover,
     };
-    (session, tx, closed, subscriptions)
+    (session, tx, closed_rx, subscriptions)
 }
 
 fn test_config(journal: Option<JournalHandle>) -> WorkerConfig {
@@ -279,7 +272,7 @@ async fn recovery_ack_precedes_snapshot_and_uses_last_payload_fence() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn reconnect_recovery_advances_epoch_and_resets_sequence() {
-    let (session1, tx1, closed1, subs1) = make_session(None);
+    let (session1, tx1, mut closed1, subs1) = make_session(None);
     let (session2, tx2, _closed2, subs2) = make_session(None);
     let factory = Arc::new(ScriptedFactory {
         next: Arc::new(Mutex::new([session1, session2].into_iter().collect())),
@@ -341,7 +334,17 @@ async fn reconnect_recovery_advances_epoch_and_resets_sequence() {
     .await
     .unwrap();
     assert_eq!(ready, (8, 1, 1));
-    assert!(closed1.load(Ordering::SeqCst));
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while !*closed1.borrow_and_update() {
+            closed1
+                .changed()
+                .await
+                .expect("mock session close signal sender dropped");
+        }
+    })
+    .await
+    .expect("first session did not close after recovery acknowledgement");
 
     // Session 2 snapshot must be epoch 2, seq 1.
     tx2.send(data_frame(200)).await.unwrap();
