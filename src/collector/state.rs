@@ -16,16 +16,20 @@ use crate::{
     Side,
     config::Settings,
     exchange::ExchangeCapabilities,
-    fixed::SCALE,
     metrics::CollectorStats,
     model::{
         BookSnapshot, Control, DiscontinuityReason, EventMeta, ExchangeEvent, LifecycleKind,
-        MarketInfo, OutputMessage, QuantityChange, ResetReason, SourceId, SourceStatus,
+        MarketInfo, OutputMessage, Price, PriceBand, PriceRange, Quantity, QuantityChange,
+        ResetReason, SourceId, SourceStatus,
     },
     orderbook::OrderBook,
     time::utc_from_us,
-    util::dtos::challenge_orderbook::{
-        PriceLevelUpdateDomain, SnapshotAsksEntryDomain, SnapshotBidsEntryDomain, SnapshotDomain,
+    util::{
+        dtos::challenge_orderbook::{
+            PriceLevelUpdateDomain, SnapshotAsksEntryDomain, SnapshotBidsEntryDomain,
+            SnapshotDomain,
+        },
+        price_to_sbe, quantity_to_sbe,
     },
 };
 
@@ -858,12 +862,18 @@ impl CollectorCore {
             state.resolve_incident(meta.received_at_us);
         }
 
-        let message = build_snapshot(
+        let message = match build_snapshot(
             &state.info,
             &state.books[&source].book,
             meta.received_at_us,
             exchange_ts,
-        );
+        ) {
+            Ok(message) => message,
+            Err(error) => {
+                warn!(%source, native, error = %error, "snapshot is not exactly representable in SBE");
+                return Vec::new();
+            }
+        };
         if was_active.is_none() {
             state.active = Some(source);
             if was_emitted {
@@ -901,7 +911,7 @@ impl CollectorCore {
         source: SourceId,
         native: &str,
         side: Side,
-        price: i64,
+        price: Price,
         change: QuantityChange,
         meta: EventMeta,
     ) -> Vec<OutputMessage> {
@@ -946,7 +956,7 @@ impl CollectorCore {
             source_book.last_exchange_ts_us = Some(exchange_ts);
             source_book.last_received_at_us = Some(meta.received_at_us);
             (
-                source_book.book.quantity(side, price).unwrap_or(0),
+                source_book.book.quantity(side, price).unwrap_or_default(),
                 source_book.book.is_crossed(),
             )
         };
@@ -967,7 +977,9 @@ impl CollectorCore {
         if state.active == Some(source) {
             state.probes = 0;
             state.last_probe_us = meta.received_at_us;
-            if matches!(change, QuantityChange::Delta(0)) {
+            if let QuantityChange::Delta(delta) = change
+                && delta.is_zero()
+            {
                 if clock_regression {
                     state.emitted_clock = meta.clock;
                 }
@@ -985,15 +997,25 @@ impl CollectorCore {
             } else {
                 state.crossed_since_us = None;
             }
-            let symbol = state.info.symbol.clone();
-            let update = build_delta(
-                symbol,
+            let update = match build_delta(
+                &state.info,
                 side,
                 price,
                 quantity,
                 meta.received_at_us,
                 exchange_ts,
-            );
+            ) {
+                Ok(update) => update,
+                Err(error) => {
+                    warn!(
+                        %source,
+                        native,
+                        error = %error,
+                        "rejecting level update that is not exactly representable in SBE"
+                    );
+                    return Vec::new();
+                }
+            };
             self.stats.deltas_emitted = self.stats.deltas_emitted.saturating_add(1);
             vec![OutputMessage::PriceLevelUpdate(update)]
         } else {
@@ -1038,12 +1060,7 @@ impl CollectorCore {
                 }
             }
             LifecycleKind::PriceStructureUpdated => {
-                if let Some(ranges) = price_ranges {
-                    state.info.tick_size_us = tick_size_us.or_else(|| min_tick(&ranges));
-                    state.info.price_ranges = ranges;
-                } else if tick_size_us.is_some() {
-                    state.info.tick_size_us = tick_size_us;
-                }
+                apply_price_structure(&mut state.info, tick_size_us, price_ranges.as_deref());
                 if price_level_structure.is_some() {
                     state.info.price_level_structure = price_level_structure;
                 }
@@ -1058,13 +1075,7 @@ impl CollectorCore {
                 if title.is_some() {
                     state.info.title = title;
                 }
-                if tick_size_us.is_some() {
-                    state.info.tick_size_us = tick_size_us;
-                }
-                if let Some(ranges) = price_ranges {
-                    state.info.tick_size_us = tick_size_us.or_else(|| min_tick(&ranges));
-                    state.info.price_ranges = ranges;
-                }
+                apply_price_structure(&mut state.info, tick_size_us, price_ranges.as_deref());
                 if price_level_structure.is_some() {
                     state.info.price_level_structure = price_level_structure;
                 }
@@ -1259,18 +1270,20 @@ impl CollectorCore {
                     }
                 } else {
                     let exchange_ts = book.last_exchange_ts_us.unwrap_or(now_us);
-                    outputs.push(OutputMessage::Snapshot(build_snapshot(
-                        &state.info,
-                        &book.book,
-                        now_us,
-                        exchange_ts,
-                    )));
-                    state.emitted_any = true;
-                    state.last_emit_us = Some(now_us);
-                    state.emitted_exchange_ts_us = Some(exchange_ts);
-                    state.next_snapshot_us = now_us.saturating_add(interval);
-                    state.crossed_since_us = None;
-                    periodic_count = periodic_count.saturating_add(1);
+                    match build_snapshot(&state.info, &book.book, now_us, exchange_ts) {
+                        Ok(snapshot) => {
+                            outputs.push(OutputMessage::Snapshot(snapshot));
+                            state.emitted_any = true;
+                            state.last_emit_us = Some(now_us);
+                            state.emitted_exchange_ts_us = Some(exchange_ts);
+                            state.next_snapshot_us = now_us.saturating_add(interval);
+                            state.crossed_since_us = None;
+                            periodic_count = periodic_count.saturating_add(1);
+                        }
+                        Err(error) => {
+                            warn!(native, error = %error, "periodic snapshot is not exactly representable in SBE");
+                        }
+                    }
                 }
             }
 
@@ -1361,14 +1374,16 @@ impl CollectorCore {
                 continue;
             };
             let exchange_ts = book.last_exchange_ts_us.unwrap_or(now_us);
-            outputs.push(OutputMessage::Snapshot(build_snapshot(
-                &state.info,
-                &book.book,
-                now_us,
-                exchange_ts,
-            )));
-            state.last_emit_us = Some(now_us);
-            count = count.saturating_add(1);
+            match build_snapshot(&state.info, &book.book, now_us, exchange_ts) {
+                Ok(snapshot) => {
+                    outputs.push(OutputMessage::Snapshot(snapshot));
+                    state.last_emit_us = Some(now_us);
+                    count = count.saturating_add(1);
+                }
+                Err(error) => {
+                    warn!(symbol = %state.info.symbol, error = %error, "final snapshot is not exactly representable in SBE");
+                }
+            }
         }
         self.stats.final_snapshots = self.stats.final_snapshots.saturating_add(count);
         outputs
@@ -1513,7 +1528,18 @@ impl CollectorCore {
         };
 
         let exchange_ts = state.books[&backup].last_exchange_ts_us.unwrap_or(now_us);
-        let message = build_snapshot(&state.info, &state.books[&backup].book, now_us, exchange_ts);
+        let message = match build_snapshot(
+            &state.info,
+            &state.books[&backup].book,
+            now_us,
+            exchange_ts,
+        ) {
+            Ok(message) => message,
+            Err(error) => {
+                warn!(native, error = %error, "reseat snapshot is not exactly representable in SBE");
+                return Vec::new();
+            }
+        };
         state.active = Some(backup);
         state.emitted_any = true;
         state.emitted_clock = state.books[&backup].last_clock.or(state.emitted_clock);
@@ -1562,6 +1588,24 @@ fn record_incident(stats: &mut CollectorStats, started: bool, quantifiable: bool
     stats.discontinuity_incidents = stats.discontinuity_incidents.saturating_add(1);
     if !quantifiable {
         stats.unquantifiable_gaps = stats.unquantifiable_gaps.saturating_add(1);
+    }
+}
+
+fn apply_price_structure(
+    info: &mut MarketInfo,
+    tick_size_us: Option<i64>,
+    price_ranges: Option<&[PriceRange]>,
+) {
+    if let Some(ranges) = price_ranges {
+        info.tick_size_us = tick_size_us.or_else(|| min_tick(ranges));
+        info.price_ranges = ranges.to_vec();
+        info.numeric_spec.tick_schedule = ranges.iter().copied().map(PriceRange::to_band).collect();
+    } else if let Some(tick) = tick_size_us {
+        info.tick_size_us = Some(tick);
+        if tick > 0 {
+            info.numeric_spec.tick_schedule =
+                vec![PriceBand::from_micros(0, crate::fixed::SCALE, tick, 0)];
+        }
     }
 }
 
@@ -1640,31 +1684,45 @@ fn build_snapshot(
     book: &OrderBook,
     received_at_us: i64,
     exchange_ts_us: i64,
-) -> SnapshotDomain {
+) -> anyhow::Result<SnapshotDomain> {
     let received_at = timestamp(received_at_us);
     let exchange_timestamp = timestamp_or(exchange_ts_us, received_at);
     let levels = book.to_snapshot();
-    SnapshotDomain {
+    let bids = sbe_levels(&levels.bids, info)?
+        .into_iter()
+        .map(|(price_level, quantity)| SnapshotBidsEntryDomain {
+            price_level,
+            quantity,
+        })
+        .collect();
+    let asks = sbe_levels(&levels.asks, info)?
+        .into_iter()
+        .map(|(price_level, quantity)| SnapshotAsksEntryDomain {
+            price_level,
+            quantity,
+        })
+        .collect();
+    Ok(SnapshotDomain {
         received_at,
         exchange_timestamp,
-        bids: levels
-            .bids
-            .into_iter()
-            .map(|level| SnapshotBidsEntryDomain {
-                price_level: level.price,
-                quantity: level.quantity,
-            })
-            .collect(),
-        asks: levels
-            .asks
-            .into_iter()
-            .map(|level| SnapshotAsksEntryDomain {
-                price_level: level.price,
-                quantity: level.quantity,
-            })
-            .collect(),
+        bids,
+        asks,
         symbol: info.symbol.clone(),
+    })
+}
+
+fn sbe_levels(
+    levels: &[crate::model::Level],
+    info: &MarketInfo,
+) -> anyhow::Result<Vec<(i64, i64)>> {
+    let mut entries = Vec::with_capacity(levels.len());
+    for level in levels {
+        entries.push(
+            crate::util::level_to_sbe(level, &info.numeric_spec)
+                .with_context(|| format!("converting price level for `{}`", info.symbol))?,
+        );
     }
+    Ok(entries)
 }
 
 fn build_empty_snapshot(
@@ -1683,23 +1741,24 @@ fn build_empty_snapshot(
 }
 
 fn build_delta(
-    symbol: String,
+    info: &MarketInfo,
     side: Side,
-    price: i64,
-    quantity: i64,
+    price: Price,
+    quantity: Quantity,
     received_at_us: i64,
     exchange_ts_us: i64,
-) -> PriceLevelUpdateDomain {
-    debug_assert!((0..=SCALE).contains(&price));
+) -> anyhow::Result<PriceLevelUpdateDomain> {
     let backtest_timestamp = timestamp(received_at_us);
-    PriceLevelUpdateDomain {
+    Ok(PriceLevelUpdateDomain {
         backtest_timestamp,
         exchange_timestamp: timestamp_or(exchange_ts_us, backtest_timestamp),
-        price_level: price,
-        quantity,
+        price_level: price_to_sbe(price, &info.numeric_spec)
+            .with_context(|| format!("converting price for `{}`", info.symbol))?,
+        quantity: quantity_to_sbe(quantity, &info.numeric_spec)
+            .with_context(|| format!("converting quantity for `{}`", info.symbol))?,
         side,
-        symbol,
-    }
+        symbol: info.symbol.clone(),
+    })
 }
 
 /// Convert a validated timestamp for SBE serialization.

@@ -18,7 +18,7 @@ use url::Url;
 use crate::{
     exchange::{DiscoveryResult, DiscoveryStats, kalshi::KalshiExchange},
     fixed::parse_micros,
-    model::{MarketInfo, PriceRange},
+    model::{MarketInfo, NumericSpec, PriceRange, PriceUnit, QuantityUnit, Ratio},
     time::{now_us, parse_rfc3339_us},
 };
 
@@ -354,6 +354,20 @@ impl RawMarket {
             .context("invalid Kalshi close_time")?;
         let price_ranges = parse_price_ranges(self.price_ranges.as_deref())?;
         let tick_size_us = price_ranges.iter().map(|range| range.step_us).min();
+        let numeric_spec = NumericSpec {
+            price_scale: 6,
+            quantity_scale: 6,
+            price_unit: PriceUnit::Currency("USD".to_owned()),
+            quantity_unit: QuantityUnit::Contracts,
+            tick_schedule: price_ranges
+                .iter()
+                .copied()
+                .map(PriceRange::to_band)
+                .collect(),
+            quantity_step: None,
+            lot_size: None,
+            contract_multiplier: Some(Ratio::new(1, 1)?),
+        };
         let info = MarketInfo {
             exchange: "kalshi".to_owned(),
             native_symbol: self.ticker.clone(),
@@ -365,6 +379,7 @@ impl RawMarket {
             tick_size_us,
             price_ranges,
             price_level_structure: self.price_level_structure,
+            numeric_spec,
         };
         info.validate()?;
         Ok(Some(info))
@@ -400,7 +415,7 @@ fn parse_price_ranges(ranges: Option<&[RawPriceRange]>) -> anyhow::Result<Vec<Pr
                 end_us: parse_micros(end).context("invalid Kalshi price range end")?,
                 step_us: parse_micros(step).context("invalid Kalshi price range step")?,
             };
-            range.validate()?;
+            range.validate_probability()?;
             Ok(range)
         })
         .collect()

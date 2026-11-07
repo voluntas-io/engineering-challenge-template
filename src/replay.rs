@@ -20,10 +20,9 @@ use crate::{
     Side,
     collector::{CollectorCore, CoreConfig},
     config::Settings,
-    fixed::SCALE,
     model::{
-        BookSnapshot, EventMeta, ExchangeEvent, Level, LifecycleKind, MarketInfo, QuantityChange,
-        ResetReason, SourceId, SourceStatus,
+        BookSnapshot, EventMeta, ExchangeEvent, Level, LifecycleKind, MarketInfo, Price, Quantity,
+        QuantityChange, QuantityDelta, ResetReason, SourceId, SourceStatus,
     },
     report::{MarketMetadata, ReportConfig, RunReport, sidecar_path},
     time::{now_us, utc_from_us},
@@ -251,22 +250,21 @@ pub fn run(settings: Settings, input: &Path) -> anyhow::Result<RunReport> {
                         "replay delta line {} supplies both quantity and delta",
                         line_number + 1
                     ),
-                    (Some(quantity), None) => QuantityChange::Absolute(quantity),
-                    (None, Some(delta)) => QuantityChange::Delta(delta),
+                    (Some(quantity), None) => {
+                        QuantityChange::Absolute(Quantity::new(quantity).with_context(|| {
+                            format!("negative replay quantity on line {}", line_number + 1)
+                        })?)
+                    }
+                    (None, Some(delta)) => QuantityChange::Delta(QuantityDelta::from_raw(delta)),
                     (None, None) => bail!(
                         "replay delta line {} supplies neither quantity nor delta",
                         line_number + 1
                     ),
                 };
-                anyhow::ensure!(
-                    (0..=SCALE).contains(&price),
-                    "replay delta price outside [0, 1] on line {}",
-                    line_number + 1
-                );
                 let event = ExchangeEvent::LevelChange {
                     native_symbol,
                     side,
-                    price,
+                    price: Price::from_raw(price),
                     change,
                     meta: EventMeta {
                         received_at_us,

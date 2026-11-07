@@ -16,7 +16,10 @@ use tracing::warn;
 use crate::{
     Side,
     fixed::{parse_micros, parse_price, parse_quantity},
-    model::{BookSnapshot, EventMeta, ExchangeEvent, Level, LifecycleKind, QuantityChange},
+    model::{
+        BookSnapshot, EventMeta, ExchangeEvent, Level, LifecycleKind, Price, Quantity,
+        QuantityChange,
+    },
     time::{epoch_ms_to_us, epoch_secs_to_us, parse_rfc3339_us},
 };
 
@@ -146,8 +149,8 @@ fn decode_object(
                 events.push(ExchangeEvent::LevelChange {
                     native_symbol,
                     side,
-                    price,
-                    change: QuantityChange::Absolute(size),
+                    price: Price::from_raw(price),
+                    change: QuantityChange::Absolute(Quantity::new(size)?),
                     meta,
                 });
             }
@@ -266,7 +269,10 @@ fn parse_book_side(
                 .get("size")
                 .context("Polymarket book level has no size")?,
         )?)?;
-        let entry = Level { price, quantity };
+        let entry = Level {
+            price: Price::from_raw(price),
+            quantity: Quantity::new(quantity)?,
+        };
         match side {
             Side::Buy => book.bids.push(entry),
             Side::Sell => book.asks.push(entry),
@@ -358,15 +364,15 @@ mod tests {
         assert_eq!(
             book.bids[0],
             Level {
-                price: 480_000,
-                quantity: 30_000_000
+                price: Price::from_raw(480_000),
+                quantity: Quantity::new(30_000_000).unwrap()
             }
         );
         assert_eq!(
             book.asks[0],
             Level {
-                price: 520_000,
-                quantity: 25_000_000
+                price: Price::from_raw(520_000),
+                quantity: Quantity::new(25_000_000).unwrap()
             }
         );
         assert_eq!(meta.exchange_ts_us, Some(1_757_908_892_351_000));
@@ -395,12 +401,15 @@ mod tests {
         };
         assert_eq!(native_symbol, "123");
         assert_eq!(*side, Side::Buy);
-        assert_eq!(*price, 500_000);
-        assert_eq!(*change, QuantityChange::Absolute(200_000_000));
+        assert_eq!(*price, Price::from_raw(500_000));
+        assert_eq!(
+            *change,
+            QuantityChange::Absolute(Quantity::new(200_000_000).unwrap())
+        );
         let ExchangeEvent::LevelChange { change, .. } = &events[1] else {
             panic!("expected level change");
         };
-        assert_eq!(*change, QuantityChange::Absolute(0));
+        assert_eq!(*change, QuantityChange::Absolute(Quantity::new(0).unwrap()));
     }
 
     #[test]
@@ -671,15 +680,15 @@ mod tests {
         assert_eq!(
             book.bids[0],
             Level {
-                price: 80_000,
-                quantity: 33_343_400_000
+                price: Price::from_raw(80_000),
+                quantity: Quantity::new(33_343_400_000).unwrap()
             }
         );
         assert_eq!(
             book.asks[0],
             Level {
-                price: 990_000,
-                quantity: 218_442_270_000
+                price: Price::from_raw(990_000),
+                quantity: Quantity::new(218_442_270_000).unwrap()
             }
         );
         assert_eq!(meta.exchange_ts_us, Some(1_782_753_357_257_000));
@@ -708,8 +717,11 @@ mod tests {
             "107505882767731489358349912513945399560393482969656700824895970500493757150417"
         );
         assert_eq!(*side, Side::Buy);
-        assert_eq!(*price, 80_000);
-        assert_eq!(*change, QuantityChange::Absolute(33_343_400_000));
+        assert_eq!(*price, Price::from_raw(80_000));
+        assert_eq!(
+            *change,
+            QuantityChange::Absolute(Quantity::new(33_343_400_000).unwrap())
+        );
         assert_eq!(meta.exchange_ts_us, Some(1_782_753_357_257_000));
 
         let ExchangeEvent::LevelChange {
@@ -727,8 +739,11 @@ mod tests {
             "7305630249804085635496399869905769372294302716159034447326228509068694952392"
         );
         assert_eq!(*side, Side::Sell);
-        assert_eq!(*price, 510_000);
-        assert_eq!(*change, QuantityChange::Absolute(4_250_000));
+        assert_eq!(*price, Price::from_raw(510_000));
+        assert_eq!(
+            *change,
+            QuantityChange::Absolute(Quantity::new(4_250_000).unwrap())
+        );
     }
 
     #[test]

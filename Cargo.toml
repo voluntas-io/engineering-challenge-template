@@ -34,6 +34,11 @@ url = "2"
 [dev-dependencies]
 tempfile = "3"
 
+# Standalone numeric-model benchmark; runs on stable Rust and prints timings.
+[[bench]]
+name = "numeric_model"
+harness = false
+
 [build-dependencies]
 ergo-sbe = "=0.1.16"
 indexmap = { version = "2", features = ["serde"] }

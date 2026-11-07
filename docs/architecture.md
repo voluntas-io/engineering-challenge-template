@@ -15,11 +15,14 @@ supplied SBE schema, and optionally records exact public websocket frames. It
 does not submit orders, hold positions, or run strategy or pre-trade risk.
 
 Kalshi and Polymarket are the first venue adapters, not the limits of the
-domain model. The current constraints that follow from the prediction-market
-scope — venue enumeration, binary outcome fields, the `[0, 1]` price range, and
-six-decimal fixed-point values — are listed as deliberate gaps in the
-[platform charter](platform-charter.md). Removing them is scheduled work, not an
-implicit capability of this implementation.
+domain model. The general numeric model (PR #33) removed the universal
+`[0, 1]` price range and six-decimal scale: `Price` and `Quantity` are exact
+`i64` coefficients interpreted by each instrument's `NumericSpec` (scale,
+units, tick bands, quantity step, lot size, contract multiplier), and the
+prediction-market `[0, 1]` check now lives in the Kalshi/Polymarket adapters.
+Remaining deliberate gaps — venue enumeration and binary outcome fields — are
+listed in the [platform charter](platform-charter.md). Removing them is
+scheduled work, not an implicit capability of this implementation.
 
 ## Runtime composition
 

@@ -1,10 +1,12 @@
 mod aligned_sbe_reader;
 mod aligned_sbe_writer;
 pub mod dtos;
+pub mod numeric;
 mod orderbook_schema;
 
 pub use aligned_sbe_reader::{AlignedSbeReader, AlignedSbeSchema, PrefetchTask};
 pub use aligned_sbe_writer::AlignedSbeWriter;
+pub use numeric::{level_to_sbe, price_from_sbe, price_to_sbe, quantity_from_sbe, quantity_to_sbe};
 pub use orderbook_schema::OrderbookSchema;
 
 /// Lowercase hexadecimal SHA-256 used by catalog and segment manifests.

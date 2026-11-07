@@ -3,7 +3,7 @@ use crate::config::ExchangeKind;
 use crate::metrics::{CatalogHealth, MetricsRegistry, ReadinessPolicy, RuntimeStatus, WriterStats};
 use crate::model::{
     ContinuityState, Control, DiscontinuityReason, EventMeta, ExchangeEvent, Level, MarketInfo,
-    ResetReason, SourceStatus,
+    Price, Quantity, QuantityDelta, ResetReason, SourceStatus,
 };
 use crate::time::now_us;
 
@@ -77,18 +77,31 @@ fn market(native: &str) -> MarketInfo {
         tick_size_us: Some(10_000),
         price_ranges: Vec::new(),
         price_level_structure: None,
+        numeric_spec: crate::model::NumericSpec::default(),
     }
+}
+
+fn price(value: i64) -> Price {
+    Price::from_raw(value)
+}
+
+fn quantity(value: i64) -> Quantity {
+    Quantity::new(value).unwrap()
+}
+
+fn delta(value: i64) -> QuantityDelta {
+    QuantityDelta::from_raw(value)
 }
 
 fn book(bid: i64, ask: i64) -> BookSnapshot {
     BookSnapshot {
         bids: vec![Level {
-            price: bid,
-            quantity: 10_000_000,
+            price: price(bid),
+            quantity: quantity(10_000_000),
         }],
         asks: vec![Level {
-            price: ask,
-            quantity: 5_000_000,
+            price: price(ask),
+            quantity: quantity(5_000_000),
         }],
     }
 }
@@ -152,8 +165,8 @@ fn delta_event_fenced(
     ExchangeEvent::LevelChange {
         native_symbol: native.to_owned(),
         side,
-        price,
-        change: QuantityChange::Absolute(quantity),
+        price: Price::from_raw(price),
+        change: QuantityChange::Absolute(Quantity::new(quantity).unwrap()),
         meta: EventMeta {
             received_at_us,
             exchange_ts_us: Some(received_at_us - 1_000),
@@ -341,8 +354,8 @@ fn snapshot_anchors_delta_application_in_per_symbol_order() {
         ExchangeEvent::LevelChange {
             native_symbol: "A".to_owned(),
             side: Side::Buy,
-            price: 400_000,
-            change: QuantityChange::Delta(2_000_000),
+            price: price(400_000),
+            change: QuantityChange::Delta(delta(2_000_000)),
             meta: EventMeta {
                 received_at_us: NOW + 1,
                 exchange_ts_us: Some(NOW),
@@ -369,8 +382,8 @@ fn snapshot_anchors_delta_application_in_per_symbol_order() {
         ExchangeEvent::LevelChange {
             native_symbol: "A".to_owned(),
             side: Side::Buy,
-            price: 400_000,
-            change: QuantityChange::Absolute(9_000_000),
+            price: price(400_000),
+            change: QuantityChange::Absolute(quantity(9_000_000)),
             meta: EventMeta {
                 received_at_us: NOW + 2,
                 exchange_ts_us: Some(NOW + 1),
@@ -662,8 +675,8 @@ fn maintenance_clock_regression_starts_a_new_epoch() {
         ExchangeEvent::LevelChange {
             native_symbol: "A".to_owned(),
             side: Side::Buy,
-            price: 400_000,
-            change: QuantityChange::Delta(1_000_000),
+            price: price(400_000),
+            change: QuantityChange::Delta(delta(1_000_000)),
             meta: EventMeta {
                 received_at_us: NOW + 1,
                 exchange_ts_us: Some(NOW),

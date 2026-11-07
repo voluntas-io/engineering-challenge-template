@@ -14,7 +14,8 @@ use crate::{
         SCALE, cents_to_micros, contracts_to_micros, parse_micros, parse_price, parse_quantity,
     },
     model::{
-        BookSnapshot, EventMeta, ExchangeEvent, Level, LifecycleKind, PriceRange, QuantityChange,
+        BookSnapshot, EventMeta, ExchangeEvent, Level, LifecycleKind, Price, PriceRange, Quantity,
+        QuantityChange, QuantityDelta,
     },
     time::{epoch_ms_to_us, epoch_secs_to_us},
 };
@@ -178,8 +179,8 @@ pub fn decode_kalshi_message(payload: &str, received_at_us: i64) -> anyhow::Resu
                 event: ExchangeEvent::LevelChange {
                     native_symbol,
                     side,
-                    price,
-                    change: QuantityChange::Delta(delta),
+                    price: Price::from_raw(price),
+                    change: QuantityChange::Delta(QuantityDelta::from_raw(delta)),
                     meta,
                 },
             })
@@ -322,7 +323,7 @@ fn parse_lifecycle_price_ranges(
             end_us: parse_micros(end).context("invalid Kalshi price range end")?,
             step_us: parse_micros(step).context("invalid Kalshi price range step")?,
         };
-        range.validate()?;
+        range.validate_probability()?;
         parsed.push(range);
     }
     Ok(Some(parsed))
@@ -398,12 +399,12 @@ fn parse_snapshot_side(
         for level in parse_level_array(levels, false)? {
             let price = if invert_price {
                 SCALE
-                    .checked_sub(level.price)
+                    .checked_sub(level.price.raw())
                     .context("Kalshi NO price exceeds one dollar")?
             } else {
-                level.price
+                level.price.raw()
             };
-            push_level(book, side, price, level.quantity)?;
+            push_level(book, side, price, level.quantity.raw())?;
         }
         return Ok(());
     }
@@ -411,12 +412,12 @@ fn parse_snapshot_side(
         for level in parse_level_array(levels, true)? {
             let price = if invert_price {
                 SCALE
-                    .checked_sub(level.price)
+                    .checked_sub(level.price.raw())
                     .context("Kalshi NO price exceeds one dollar")?
             } else {
-                level.price
+                level.price.raw()
             };
-            push_level(book, side, price, level.quantity)?;
+            push_level(book, side, price, level.quantity.raw())?;
         }
     }
     Ok(())
@@ -442,7 +443,10 @@ fn parse_level_array(value: &Value, legacy: bool) -> anyhow::Result<Vec<Level>> 
         } else {
             parse_quantity(&scalar_string(&pair[1])?)?
         };
-        levels.push(Level { price, quantity });
+        levels.push(Level {
+            price: Price::from_raw(price),
+            quantity: Quantity::new(quantity)?,
+        });
     }
     Ok(levels)
 }
@@ -474,10 +478,14 @@ fn push_level(
     quantity: i64,
 ) -> anyhow::Result<()> {
     anyhow::ensure!((0..=SCALE).contains(&price), "Kalshi price outside [0, 1]");
-    anyhow::ensure!(quantity >= 0, "negative Kalshi quantity");
+    let quantity = Quantity::new(quantity).context("negative Kalshi quantity")?;
+    let level = Level {
+        price: Price::from_raw(price),
+        quantity,
+    };
     match side {
-        Side::Buy => book.bids.push(Level { price, quantity }),
-        Side::Sell => book.asks.push(Level { price, quantity }),
+        Side::Buy => book.bids.push(level),
+        Side::Sell => book.asks.push(level),
     }
     Ok(())
 }
@@ -507,15 +515,15 @@ mod tests {
         assert_eq!(
             book.bids[0],
             Level {
-                price: 80_000,
-                quantity: 300_000_000
+                price: Price::from_raw(80_000),
+                quantity: Quantity::new(300_000_000).unwrap()
             }
         );
         assert_eq!(
             book.asks[0],
             Level {
-                price: 460_000,
-                quantity: 20_000_000
+                price: Price::from_raw(460_000),
+                quantity: Quantity::new(20_000_000).unwrap()
             }
         );
         assert_eq!(meta.clock, Some(4_182_057));
@@ -543,8 +551,11 @@ mod tests {
             panic!("expected level change");
         };
         assert_eq!(side, Side::Sell);
-        assert_eq!(price, 40_000);
-        assert_eq!(change, QuantityChange::Delta(-54_000_000));
+        assert_eq!(price, Price::from_raw(40_000));
+        assert_eq!(
+            change,
+            QuantityChange::Delta(QuantityDelta::from_raw(-54_000_000))
+        );
     }
 
     #[test]
@@ -563,15 +574,15 @@ mod tests {
         assert_eq!(
             book.bids[0],
             Level {
-                price: 80_000,
-                quantity: 300_000_000
+                price: Price::from_raw(80_000),
+                quantity: Quantity::new(300_000_000).unwrap()
             }
         );
         assert_eq!(
             book.asks[0],
             Level {
-                price: 460_000,
-                quantity: 20_000_000
+                price: Price::from_raw(460_000),
+                quantity: Quantity::new(20_000_000).unwrap()
             }
         );
     }
@@ -733,6 +744,6 @@ mod tests {
             panic!("expected book");
         };
         assert_eq!(book.bids.len(), 1);
-        assert_eq!(book.bids[0].price, 400_000);
+        assert_eq!(book.bids[0].price, Price::from_raw(400_000));
     }
 }

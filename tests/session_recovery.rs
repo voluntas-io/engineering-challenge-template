@@ -29,14 +29,8 @@ fn snapshot_event(received_at_us: i64) -> ExchangeEvent {
     ExchangeEvent::Snapshot {
         native_symbol: "A".to_owned(),
         book: BookSnapshot {
-            bids: vec![Level {
-                price: 400_000,
-                quantity: 10_000_000,
-            }],
-            asks: vec![Level {
-                price: 600_000,
-                quantity: 5_000_000,
-            }],
+            bids: vec![Level::new(400_000, 10_000_000).unwrap()],
+            asks: vec![Level::new(600_000, 5_000_000).unwrap()],
         },
         meta: EventMeta {
             received_at_us,

@@ -18,7 +18,7 @@ use serde_json::{Value, json};
 
 use crate::{
     Side,
-    model::{BookSnapshot, Level, QuantityChange},
+    model::{BookSnapshot, Level, Price, Quantity, QuantityChange},
     orderbook::OrderBook,
     util::{
         AlignedSbeReader, OrderbookSchema,
@@ -154,8 +154,17 @@ pub fn run(input: &Path, chunk_size: &str) -> anyhow::Result<VerifySummary> {
                 let book = books.entry(update.symbol.clone()).or_default();
                 book.apply(
                     update.side,
-                    update.price_level,
-                    QuantityChange::Absolute(update.quantity),
+                    Price::from_raw(update.price_level),
+                    QuantityChange::Absolute(Quantity::new(update.quantity).with_context(
+                        || {
+                            format!(
+                                "negative {} quantity {} for `{}`",
+                                side_name(update.side),
+                                update.quantity,
+                                update.symbol
+                            )
+                        },
+                    )?),
                 )
                 .with_context(|| {
                     format!(
@@ -186,19 +195,13 @@ fn book_from_snapshot(snapshot: &SnapshotDomain) -> anyhow::Result<OrderBook> {
         bids: snapshot
             .bids
             .iter()
-            .map(|level| Level {
-                price: level.price_level,
-                quantity: level.quantity,
-            })
-            .collect(),
+            .map(|level| Level::new(level.price_level, level.quantity))
+            .collect::<anyhow::Result<Vec<_>>>()?,
         asks: snapshot
             .asks
             .iter()
-            .map(|level| Level {
-                price: level.price_level,
-                quantity: level.quantity,
-            })
-            .collect(),
+            .map(|level| Level::new(level.price_level, level.quantity))
+            .collect::<anyhow::Result<Vec<_>>>()?,
     };
     let mut book = OrderBook::new();
     book.replace(&book_snapshot)
@@ -211,8 +214,8 @@ fn levels_json(levels: Vec<Level>) -> Vec<Value> {
         .into_iter()
         .map(|level| {
             json!({
-                "price": level.price,
-                "quantity": level.quantity,
+                "price": level.price.raw(),
+                "quantity": level.quantity.raw(),
             })
         })
         .collect()

@@ -298,11 +298,17 @@ general support.
 
 - `ExchangeKind` enumerates only Kalshi and Polymarket.
 - `MarketInfo` carries prediction-market fields such as `outcome`.
-- `PriceRange::validate` and `OrderBook` reject prices outside `[0, 1]`.
-- `fixed.rs` documents six-decimal prices and share-or-contract quantities.
 - `ExchangeCapabilities` models only whether a comparable sequence clock exists.
 - `Exchange` assumes discovery and a session factory.
-- The challenge SBE schema encodes USDC prices and share-or-contract quantities.
+- The challenge SBE schema encodes USDC prices and share-or-contract quantities
+  at six decimal places; conversion to/from instrument scales is exact or
+  rejected (`src/util/numeric.rs`).
+
+The general numeric model (PR #33) closed the former price-range and
+fixed-scale gaps: `Price` and `Quantity` are signed `i64` coefficients,
+`NumericSpec` carries scale/units/tick bands/steps/multipliers per instrument,
+and `OrderBook` no longer imposes `[0, 1]`. The `[0, 1]` check remains only in
+the Kalshi and Polymarket adapters.
 
 Closing these gaps changes the domain model, not just documentation. Until then,
 the platform is a prediction-market collector with reusable infrastructure, and

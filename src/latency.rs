@@ -493,10 +493,10 @@ fn event_key(event: &ExchangeEvent) -> Option<EventKey> {
             meta,
             EventDetail::Level {
                 side: *side,
-                price: *price,
+                price: price.raw(),
                 change: match change {
-                    QuantityChange::Absolute(quantity) => (0, *quantity),
-                    QuantityChange::Delta(quantity) => (1, *quantity),
+                    QuantityChange::Absolute(quantity) => (0, quantity.raw()),
+                    QuantityChange::Delta(quantity) => (1, quantity.raw()),
                 },
             },
         ),
@@ -624,7 +624,7 @@ fn failure_text(failure: &SessionFailure) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::EventMeta;
+    use crate::model::{EventMeta, Price, Quantity};
 
     #[test]
     fn percentile_is_nearest_rank_without_extrapolation() {
@@ -638,8 +638,8 @@ mod tests {
         ExchangeEvent::LevelChange {
             native_symbol: symbol.to_owned(),
             side: Side::Buy,
-            price,
-            change: QuantityChange::Absolute(quantity),
+            price: Price::from_raw(price),
+            change: QuantityChange::Absolute(Quantity::new(quantity).unwrap()),
             meta: EventMeta {
                 received_at_us: timestamp,
                 exchange_ts_us: Some(timestamp),

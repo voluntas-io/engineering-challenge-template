@@ -62,6 +62,7 @@ SOURCE_RESPONSIBILITIES = {
     "src/util/build.rs": "build-time SBE DTO/codec generation integration",
     "src/util/dtos.rs": "generated domain DTO bridge for supplied SBE schema",
     "src/util/mod.rs": "SBE utility module exports",
+    "src/util/numeric.rs": "exact instrument-scale to SBE numeric conversion",
     "src/util/orderbook_schema.rs": "schema-facing book message definitions/adaptation",
     "src/util/sbe_yaml.rs": "supplied SBE schema loading/validation support",
 }

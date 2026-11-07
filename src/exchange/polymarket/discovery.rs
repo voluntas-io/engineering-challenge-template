@@ -24,8 +24,8 @@ use url::Url;
 
 use crate::{
     exchange::{DiscoveryResult, DiscoveryStats},
-    fixed::parse_micros,
-    model::MarketInfo,
+    fixed::{SCALE, parse_micros},
+    model::{MarketInfo, NumericSpec, PriceBand, PriceUnit, QuantityUnit, Ratio},
     time::{now_us, parse_rfc3339_us},
 };
 
@@ -185,6 +185,9 @@ impl RawMarket {
             }
             None => None,
         };
+        let tick_schedule = tick_size_us
+            .map(|step| vec![PriceBand::from_micros(0, SCALE, step, 0)])
+            .unwrap_or_default();
         let mut markets = Vec::with_capacity(identifiers.len());
         for (index, (identifier, outcome)) in identifiers.into_iter().zip(outcomes).enumerate() {
             // The output symbol is derived from immutable venue identity only:
@@ -203,6 +206,16 @@ impl RawMarket {
                 tick_size_us,
                 price_ranges: Vec::new(),
                 price_level_structure: None,
+                numeric_spec: NumericSpec {
+                    price_scale: 6,
+                    quantity_scale: 6,
+                    price_unit: PriceUnit::Currency("USDC".to_owned()),
+                    quantity_unit: QuantityUnit::Contracts,
+                    tick_schedule: tick_schedule.clone(),
+                    quantity_step: None,
+                    lot_size: None,
+                    contract_multiplier: Some(Ratio::new(1, 1)?),
+                },
             };
             info.validate()?;
             markets.push(info);

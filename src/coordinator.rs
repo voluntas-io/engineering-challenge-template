@@ -1021,6 +1021,7 @@ mod tests {
             tick_size_us: Some(1_000),
             price_ranges: Vec::new(),
             price_level_structure: None,
+            numeric_spec: crate::model::NumericSpec::default(),
         }
     }
 

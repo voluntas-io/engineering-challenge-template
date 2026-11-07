@@ -404,7 +404,7 @@ mod tests {
                     && native_symbol == asset
                 {
                     let level = book.bids.first().expect("bid level");
-                    return (level.price, level.quantity);
+                    return (level.price.raw(), level.quantity.raw());
                 }
             }
         }
