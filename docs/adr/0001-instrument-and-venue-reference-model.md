@@ -2,6 +2,8 @@
 
 - **Status:** Proposed
 - **Date:** 2026-11-07
+- **Revision:** 1 — listing/segment cardinality, provider/feed mappings, and
+  same-ticker ambiguity.
 - **Scope:** Documentation and design decision only. No Rust types, catalog,
   database, schema, or adapter changes.
 - **Related:** [Platform charter](../platform-charter.md),
@@ -11,6 +13,10 @@
 
 This ADR is **Proposed**. It becomes **Accepted** only after the identity
 invariant and worked scenarios are reviewed.
+
+Revision 1 amends the listing/segment cardinality, adds provider/feed instrument
+mappings for instruments without listings, and makes same-ticker resolution
+explicitly unresolved or ambiguous without authoritative evidence.
 
 The platform charter defines five boundaries and states that an instrument is
 not a venue symbol. The current implementation does not yet separate those
@@ -196,31 +202,36 @@ venues; one venue can have several market segments.
 
 A `MarketSegment` is a segment of a venue, where the venue has such a structure.
 It carries the segment MIC or venue-specific segment identifier and the rules
-that apply to listings in that segment. A venue has one or more segments when the
-venue publishes that structure; the model must not invent a segment that the
-venue does not define.
+that apply to listings in that segment. A venue has zero or more segments; the
+model must not invent a segment that the venue does not define and must not
+require one in order to create a listing.
 
 ### Listing
 
-A `Listing` is the admission of an instrument to trade on a market segment,
-with effective dates and listing terms. A listing belongs to exactly one
-instrument and one market segment during its validity period. An instrument can
-have many listings across venues and time.
+A `Listing` is the admission of an instrument to trade on a venue, with
+effective dates and listing terms. A listing belongs to exactly one `Venue` and
+may belong to zero or one `MarketSegment` during its validity period. An
+instrument can have many listings across venues and time.
+
+A venue can publish listings without publishing a separate segment structure.
+The segment is optional metadata about where the listing trades, not a
+precondition for the listing.
 
 An OTC instrument may have no public listing. That is a valid state, not a
 missing venue or a fabricated exchange.
 
 ### VenueInstrumentMapping
 
-A `VenueInstrumentMapping` binds an external trading identifier to a listing.
-It is scoped by venue, market segment, feed, or protocol where necessary, and it
-has an effective interval because symbols can change or be reused.
+A `VenueInstrumentMapping` binds a venue-assigned external trading identifier to
+a listing. It is scoped by venue, market segment, feed, or protocol where
+necessary, and it has an effective interval because symbols can change or be
+reused.
 
 ```text
 Instrument: canonical instrument A
 Listing:
     venue: venue V
-    market_segment: segment S
+    market_segment: segment S (optional)
 VenueInstrumentMapping:
     feed: feed F
     native_symbol: ABC
@@ -231,44 +242,87 @@ VenueInstrumentMapping:
 `ABC` on one venue and `ABC` on another are two mappings. They never collide
 merely because the text matches.
 
+The venue-assigned identifier is an assertion by the venue. It is not the same
+namespace as a provider symbol, even when a provider redistributes that venue's
+data.
+
+### FeedInstrumentMapping
+
+A `FeedInstrumentMapping` binds a provider- or feed-assigned identifier directly
+to an instrument. It does not require a listing.
+
+```text
+Instrument: canonical instrument I
+FeedInstrumentMapping:
+    data_provider: provider D
+    feed: feed Q
+    native_symbol: XYZ
+    valid_from: ...
+    valid_to: ...
+    source_provenance: ...
+```
+
+This mapping exists because a data provider may supply instruments from several
+venues, instruments with no public venue, or OTC instruments that have no public
+listing. The provider's symbol is not necessarily a venue symbol, and it must
+not be forced into the venue namespace.
+
+A feed mapping resolves directly to the instrument. If the feed also carries an
+execution-venue assertion, that assertion is a separate field on the event or
+the feed's reference data; it is not inferred from the provider symbol. A
+provider that is also a venue may publish both a venue mapping and a feed
+mapping, but the two assertions remain distinct.
+
+Provider and feed mappings preserve the same scope, provenance, and valid-time
+rules as venue mappings. When a provider partitions symbols by feed, the feed is
+part of the mapping scope; when it does not, the provider scope is sufficient.
+
 ## 4. Entity relationships and cardinalities
 
 ```text
                          INSTRUMENT
                              |
-                +------------+------------+
-                |            |            |
-          Identifiers   Specification  Relationships
-                |
-             LISTING
-                |
-       VenueInstrumentMapping
-                |
-         MARKET SEGMENT
-                |
-              VENUE
-                |
-         VENUE OPERATOR
-
-
-          DATA PROVIDER
-                |
-               FEED
-                |
-           FEED SESSION
-                |
-      Runtime worker / connection
+        +--------------------+--------------------+
+        |                    |                    |
+   Identifiers        Specification        Relationships
+        |
+        +-- LISTING (0..n)
+        |      |
+        |      +-- VENUE-ASSIGNED MAPPING
+        |      |      |
+        |      |      +-- VENUE
+        |      |            |
+        |      |            +-- MARKET SEGMENT (0..n, optional for a listing)
+        |      |            |
+        |      |            +-- VENUE OPERATOR
+        |      |
+        |      +-- VENUE (exactly one)
+        |
+        +-- PROVIDER/FEED-ASSIGNED MAPPING (0..n)
+               |
+               +-- FEED
+                     |
+                     +-- DATA PROVIDER
+                     +-- FEED SESSION
 ```
+
+The two mapping trees are intentional. Venue-assigned symbols resolve through a
+listing. Provider/feed-assigned symbols resolve directly to the instrument and
+do not require a listing.
 
 Cardinalities:
 
 - One `VenueOperator` operates one or more `Venue` records.
-- One `Venue` has one or more `MarketSegment` records when segments are known.
+- One `Venue` has zero or more `MarketSegment` records and one or more
+  `Listing` records when it publishes listings.
 - One `Instrument` has zero or more `Listing` records.
-- One `Listing` belongs to one `Instrument` and one `MarketSegment` during its
-  validity period.
-- One `Listing` has one or more `VenueInstrumentMapping` records across feeds and
+- One `Listing` belongs to exactly one `Venue` and may belong to zero or one
+  `MarketSegment` during its validity period.
+- One `Listing` has zero or more venue-assigned mappings across feeds and
   protocols.
+- One `Instrument` has zero or more provider/feed-assigned mappings.
+- One provider/feed mapping resolves directly to one `Instrument` and is scoped
+  to one `DataProvider` and, when the provider partitions symbols, one `Feed`.
 - One `DataProvider` supplies one or more `Feed` records.
 - One `Feed` has one or more `FeedSession` records and zero or more
   `Entitlement` records; public data still carries an explicit access policy.
@@ -284,11 +338,12 @@ identifier type are deferred.
 |---|---|---|---|
 | Internal instrument identity | Stable platform reference | No | Yes, within the platform |
 | Instrument identifier | External assertion such as ISIN or venue identifier | Yes, with validity | Scoped lookup only |
-| Listing identity | Admission of an instrument to a segment over time | Listing terms may change | Yes, with effective dates |
+| Listing identity | Admission of an instrument to a venue over time; segment is optional | Listing terms may change | Yes, with effective dates |
 | Venue identity | Facility identity such as a MIC | Facility metadata may change | Yes, with validity |
 | Venue operator identity | Legal entity | Corporate structure may change | Separate reference |
 | Feed / provider identity | Data delivery and entitlement | Feed versions change | Scoped reference |
-| Venue instrument mapping | External symbol on a feed | Yes; symbols are reusable | Scoped and effective-dated |
+| Venue-assigned mapping | Venue symbol for a listing | Yes; symbols are reusable | Scoped and effective-dated |
+| Provider/feed-assigned mapping | Provider or feed symbol for an instrument, with or without a listing | Yes; symbols are reusable | Scoped and effective-dated |
 | Output symbol | Serialization identity for the current SBE contract | May be regenerated | Not an instrument key |
 | `SourceId` | Runtime worker replica | Per run | Runtime only |
 
@@ -316,7 +371,9 @@ Two times must be distinguished:
 Every assertion retains its source and provenance. Corrections append a new
 version; they do not overwrite the old mapping. The model must support
 as-of-event resolution rather than resolving everything against the latest
-catalog.
+catalog. Both venue-assigned and provider/feed-assigned mappings are temporal
+assertions: their scope and validity interval are part of the lookup key, not
+optional metadata.
 
 Ambiguity is an explicit state, not a silent merge. A resolution result should
 be able to represent at least:
@@ -359,6 +416,16 @@ A feed declares its data products, visibility, delay, sequence scope, schema
 version, retention terms, and redistribution rights. A feed session is one
 runtime instance and does not create a new data product.
 
+Feed symbols resolve through a `FeedInstrumentMapping` directly to an
+instrument. A provider may redistribute venue data, but that does not make its
+symbol a venue-assigned symbol. A venue may also publish a symbol through a
+provider feed; the venue mapping and the feed mapping may coexist and must
+resolve to the same instrument when the evidence supports that conclusion.
+
+Execution venue and reporting source are independent fields. A provider may
+report a trade executed at a venue it does not operate. A provider's own symbol
+does not identify the execution venue.
+
 Runtime worker identity is also separate. The current `SourceId` is a
 worker/replica identity:
 
@@ -380,23 +447,27 @@ facility.
 
 ```text
 Instrument I (share)
-  Listing L1: venue A, segment A1, mapping symbol ABC on feed FA
-  Listing L2: venue B, segment B1, mapping symbol ABC on feed FB
+  Listing L1: venue A, optional segment A1, venue symbol ABC
+  Listing L2: venue B, optional segment B1, venue symbol ABC
 ```
 
-Result: one instrument, two listings, two mappings. A consolidated view may
-derive one best bid/offer across listings, but the listings and their books stay
-distinct.
+Result: one instrument, two listings, two venue-assigned mappings. A
+consolidated view may derive one best bid/offer across listings, but the
+listings and their books stay distinct.
 
 ### 8.2 Same ticker on two unrelated venues
 
 ```text
-Instrument I1: venue A, segment A1, mapping ABC
-Instrument I2: venue B, segment B1, mapping ABC
+Mapping M1: venue A, optional segment A1, symbol ABC -> unresolved
+Mapping M2: venue B, optional segment B1, symbol ABC -> unresolved
 ```
 
-Result: two mappings and no identity collision. A resolver must use venue,
-segment, feed, and validity, not ticker text.
+Result: two scoped mappings. Ticker text alone does not establish two
+instruments, and it does not establish one. Without authoritative identity
+evidence the resolution is unresolved or ambiguous. Evidence that the
+instruments are distinct creates two instruments; evidence that they are the
+same instrument creates one instrument with two listings. The mappings,
+provenance, and any candidate set are retained in both cases.
 
 ### 8.3 Futures contracts with different expiries
 
@@ -418,7 +489,8 @@ Event E (parent event)
 ```
 
 Result: the event is a grouping relationship, not an instrument. Each Kalshi
-market is a distinct tradable instrument with its own ticker. The current code's
+market is a distinct tradable instrument with its own ticker; each ticker is a
+venue-assigned identifier for that market's listing. The current code's
 `exchange_market_id = event_ticker` and `count_selected_markets` deduplication is
 an implementation defect to be fixed after the model is accepted. Discovery's
 record count and capacity's selected-market count must eventually agree, but
@@ -428,27 +500,34 @@ this ADR does not change either.
 
 ```text
 Instrument I (OTC contract)
-  DataProvider D (dealer or interdealer venue)
+  DataProvider D (dealer)
   Feed Q (dealer quote feed)
+  FeedInstrumentMapping: provider D, feed Q, symbol XYZ -> Instrument I
   No public listing; no public order book
+  Venue: absent unless D operates or uses a distinct venue
 ```
 
-Result: an instrument and a data provider, with no fabricated venue or listing.
-The quote is a feed product. If the dealer is also the execution venue, that is a
-separate venue assertion, not an assumption implied by the quote.
+Result: the dealer is a `DataProvider`, not a `Venue` by implication. The quote
+feed resolves its symbol directly to the instrument through a feed mapping, so
+no listing is required. If D also operates a venue, record that venue and its
+listing separately. If D uses another venue for execution, record the execution
+venue separately. Neither is inferred from the quote feed.
 
 ### 8.6 Dark-pool execution reported by a trade-reporting facility
 
 ```text
 Execution venue V (ATS/dark pool)
 Reporting source R (trade-reporting facility)
+FeedInstrumentMapping: R's feed symbol -> Instrument I
 Instrument I
 Trade event T: executed at V, reported by R
 ```
 
-Result: execution venue and reporting source remain distinct fields. The event is
-a trade. The platform must not infer hidden resting orders from the report and
-must not attach a synthetic book to V.
+Result: execution venue and reporting source remain distinct fields. The feed
+mapping resolves the reported symbol to the instrument; it does not turn R into
+the execution venue or V into the reporting source. The event is a trade. The
+platform must not infer hidden resting orders from the report and must not
+attach a synthetic book to V.
 
 ### 8.7 Polymarket condition and outcome tokens
 
@@ -460,9 +539,11 @@ Condition C (parent market/condition)
 
 Result: the condition is a grouping, and each outcome token is an independently
 tradable instrument. The condition identifier and the token identifiers are not
-interchangeable. The current output symbol `polymarket:<condition_id>:<index>`
-is a serialization mapping, not an instrument key. The `outcome` label (`Yes`,
-`No`) is metadata, not identity.
+interchangeable. A token identifier is a venue-assigned identifier for that
+instrument; the condition ID is a grouping key, not a venue-assigned instrument
+identifier. The current output symbol `polymarket:<condition_id>:<index>` is a
+serialization mapping, not an instrument key. The `outcome` label (`Yes`, `No`)
+is metadata, not identity.
 
 ## 9. Alternatives considered
 
@@ -482,9 +563,13 @@ is a serialization mapping, not an instrument key. The `outcome` label (`Yes`,
    be reusable across venues.
 6. **Treat a Kalshi event or Polymarket condition as the instrument.** Rejected:
    both are parent groupings with multiple independently tradable contracts.
-7. **Generate identity from a hash of metadata.** Rejected: mutable titles,
+7. **Require every instrument to have a venue listing and force provider symbols
+   into the venue namespace.** Rejected: OTC instruments and consolidated feeds
+   can exist without a public venue listing, and a provider's symbol is a
+   separate assertion even when the data originated at a venue.
+8. **Generate identity from a hash of metadata.** Rejected: mutable titles,
    symbols, and labels would change identity.
-8. **Adopt UUID or ULID now.** Deferred: the representation is an implementation
+9. **Adopt UUID or ULID now.** Deferred: the representation is an implementation
    detail. This ADR adds no dependency and no code.
 
 ## 10. Consequences and migration sequence
@@ -493,6 +578,15 @@ is a serialization mapping, not an instrument key. The `outcome` label (`Yes`,
 
 - The reference model becomes more explicit, with more entities and more
   validation than the current `MarketInfo` record.
+- A listing is anchored to a venue; a market segment remains optional metadata
+  rather than a precondition. This avoids inventing segments for venues that do
+  not publish them.
+- Provider and feed mappings allow OTC and consolidated sources to resolve
+  instruments without a public listing, while keeping venue-assigned and
+  feed-assigned namespaces separate.
+- Identity resolution may return unresolved or ambiguous rather than choose
+  between instruments that share a ticker. That is a required outcome, not a
+  failure to reconcile.
 - Cross-venue consolidation becomes possible without erasing venue, listing, or
   feed identity.
 - OTC and dark-pool sources can be represented without a fabricated public book.
@@ -505,7 +599,8 @@ is a serialization mapping, not an instrument key. The `outcome` label (`Yes`,
 ### Migration sequence (later PRs, not this one)
 
 1. Accept this ADR and review the identity invariant.
-2. Introduce internal instrument, listing, mapping, provider, and feed types
+2. Introduce internal instrument, venue, optional market segment, listing,
+   venue-assigned mapping, provider/feed mapping, provider, and feed types
    alongside `MarketInfo`, without changing output behavior.
 3. Have each adapter emit explicit identity assertions in addition to its
    current normalized record.
@@ -546,7 +641,10 @@ This ADR does not:
 | Venue and operator | Different identities |
 | Venue and reporting source | Different identities |
 | Instrument identifiers | Namespaced and scoped |
-| Listing and symbol mapping | Effective-dated |
+| Listing and segment | Listing belongs to exactly one venue; market segment is optional |
+| Venue-assigned mapping | Effective-dated and scoped to a venue/listing |
+| Provider/feed mapping | Resolves directly to an instrument without requiring a listing; separate from venue-assigned identifiers |
+| Same ticker on two venues | Unresolved or ambiguous without authoritative evidence |
 | Feed and feed session | Different identities |
 | Runtime `SourceId` | Documented as worker identity, not a data source |
 | Event/condition grouping | Distinct from tradable instruments |

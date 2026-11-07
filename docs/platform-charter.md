@@ -100,8 +100,9 @@ The target model distinguishes:
 
 - `Venue`: the legal or regulatory trading facility;
 - `Market`: a venue-operated market or data product;
-- `Listing`: an instrument admitted to trade on a venue;
-- `VenueInstrumentMapping`: the venue's symbol or identifier for that listing;
+- `Listing`: an instrument admitted to trade on a venue, with an optional market segment;
+- `VenueInstrumentMapping`: the venue-assigned symbol or identifier for that listing;
+- `FeedInstrumentMapping`: a provider- or feed-assigned symbol that resolves directly to an instrument, including an instrument without a listing;
 - `Feed`: a named data product with a version and access conditions;
 - `FeedSession`: one connection or subscription instance;
 - `FeedEntitlement`: what the consumer is authorized to receive and retain.
@@ -258,7 +259,7 @@ the event model.
 |---|---|---|
 | 1 | Final retry-delay evidence (PR #28) | Final-attempt behaviour has deterministic regression coverage |
 | 2 | Platform charter (PR #29) | Implemented system and target scope are separate |
-| 3 | [Instrument and venue reference-model ADR](adr/0001-instrument-and-venue-reference-model.md) (PR #30) | Instrument, listing, venue, and source have separate meanings |
+| 3 | [Instrument and venue reference-model ADR](adr/0001-instrument-and-venue-reference-model.md) (PR #30, revision 1) | Instrument, listing, venue, and source have separate meanings |
 | 4 | Numeric model ADR (PR #31) | Price and quantity no longer assume prediction-market ranges |
 | 5 | Event model ADR (PR #32) | Trades, quotes, books, auctions, and RFQs have distinct semantics |
 | 6 | Schema evolution plan (PR #33) | Challenge SBE compatibility remains intact |

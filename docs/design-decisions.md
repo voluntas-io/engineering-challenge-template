@@ -251,11 +251,11 @@ external data source.
 
 **Decision.** An instrument has a persistent platform identity independent of
 its ticker, listing, venue, feed, connection, or output symbol. Instrument,
-instrument identifier, venue, venue operator, market segment, listing, venue
-instrument mapping, data provider, feed, feed session, and entitlement are
-separate concepts. Identifiers are namespaced, scoped, and effective-dated.
-Runtime worker identity is not external source identity. Events and conditions
-are groupings, not instruments.
+instrument identifier, venue, venue operator, optional market segment, listing,
+venue-assigned mapping, provider/feed-assigned mapping, data provider, feed,
+feed session, and entitlement are separate concepts. Identifiers are namespaced,
+scoped, and effective-dated. Runtime worker identity is not external source
+identity. Events and conditions are groupings, not instruments.
 
 **Alternatives.** Keep `MarketInfo` as universal identity; key by ticker; use
 ISIN as a universal key; model every source as a public exchange; extend
