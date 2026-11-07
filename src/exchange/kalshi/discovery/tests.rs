@@ -166,6 +166,29 @@ fn retry_policy_covers_timeouts_rate_limits_and_server_errors() {
     );
 }
 
+#[test]
+fn retry_delay_is_absent_after_final_attempt() {
+    assert_eq!(
+        retry_delay_before_next_attempt(0, Some(2)),
+        Some(std::time::Duration::from_secs(2))
+    );
+
+    assert_eq!(
+        retry_delay_before_next_attempt(MAX_PAGE_ATTEMPTS - 2, Some(2)),
+        Some(std::time::Duration::from_secs(2))
+    );
+
+    assert_eq!(
+        retry_delay_before_next_attempt(MAX_PAGE_ATTEMPTS - 1, Some(2)),
+        None
+    );
+
+    assert_eq!(
+        retry_delay_before_next_attempt(MAX_PAGE_ATTEMPTS - 1, None),
+        None
+    );
+}
+
 #[tokio::test]
 async fn fetch_page_retries_408_and_honors_retry_after() {
     use std::sync::{

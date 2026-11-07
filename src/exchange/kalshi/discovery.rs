@@ -269,8 +269,8 @@ impl KalshiExchange {
                         bail!("{message}");
                     }
                     last_error = Some(message);
-                    if attempt + 1 < MAX_PAGE_ATTEMPTS {
-                        sleep(retry_delay(attempt, retry_after)).await;
+                    if let Some(delay) = retry_delay_before_next_attempt(attempt, retry_after) {
+                        sleep(delay).await;
                     }
                     continue;
                 }
@@ -278,8 +278,8 @@ impl KalshiExchange {
                     last_error = Some(format!("Kalshi discovery request failed: {error}"));
                 }
             }
-            if attempt + 1 < MAX_PAGE_ATTEMPTS {
-                sleep(retry_delay(attempt, None)).await;
+            if let Some(delay) = retry_delay_before_next_attempt(attempt, None) {
+                sleep(delay).await;
             }
         }
         Err(anyhow::anyhow!(
@@ -292,6 +292,17 @@ impl KalshiExchange {
 /// Retry transient discovery responses, including an explicit timeout.
 fn retryable_status(status: u16) -> bool {
     status == 408 || status == 429 || (500..=599).contains(&status)
+}
+
+/// Return the backoff delay before the next attempt, or `None` when the
+/// current attempt was the last one. Keeping this decision in one place makes
+/// the absent final sleep directly testable instead of inferring it from wall
+/// clock time.
+fn retry_delay_before_next_attempt(
+    attempt: u32,
+    retry_after: Option<u64>,
+) -> Option<std::time::Duration> {
+    (attempt + 1 < MAX_PAGE_ATTEMPTS).then(|| retry_delay(attempt, retry_after))
 }
 
 /// Honor a server `Retry-After` hint, capped so a hostile or mistaken value
