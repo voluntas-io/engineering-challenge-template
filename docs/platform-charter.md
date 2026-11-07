@@ -68,7 +68,9 @@ identifier, a binary outcome, or a venue-specific sequencing rule.
 
 ### 1. Instrument and reference data
 
-An instrument is not a ticker, a listing, or a venue symbol.
+An instrument is not a ticker, a listing, or a venue symbol. The detailed
+entity model, cardinalities, temporal rules, and worked identity scenarios are
+decided in [ADR 0001](adr/0001-instrument-and-venue-reference-model.md).
 
 One instrument can be listed on several venues. A futures contract has an
 expiry, a multiplier, and settlement terms. An option has an underlying, expiry,
@@ -256,7 +258,7 @@ the event model.
 |---|---|---|
 | 1 | Final retry-delay evidence (PR #28) | Final-attempt behaviour has deterministic regression coverage |
 | 2 | Platform charter (PR #29) | Implemented system and target scope are separate |
-| 3 | Instrument model ADR (PR #30) | Instrument, listing, venue, and source have separate meanings |
+| 3 | [Instrument and venue reference-model ADR](adr/0001-instrument-and-venue-reference-model.md) (PR #30) | Instrument, listing, venue, and source have separate meanings |
 | 4 | Numeric model ADR (PR #31) | Price and quantity no longer assume prediction-market ranges |
 | 5 | Event model ADR (PR #32) | Trades, quotes, books, auctions, and RFQs have distinct semantics |
 | 6 | Schema evolution plan (PR #33) | Challenge SBE compatibility remains intact |

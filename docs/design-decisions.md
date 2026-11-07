@@ -234,3 +234,41 @@ buffer downstream and preserve file order.
 `tests/e2e_mock_exchange/failover.rs::full_outage_recovery_exposes_the_uncovered_interval`,
 `tests/e2e_mock_exchange.rs::negative_control_missing_update_is_detected_by_verify`,
 `src/verify.rs::reports_a_snapshot_that_disagrees_with_reconstructed_deltas`.
+
+## 9. Instrument and venue reference model
+
+**Status.** Proposed. The full decision, entity definitions, cardinalities,
+temporal rules, and worked scenarios are in
+[ADR 0001](adr/0001-instrument-and-venue-reference-model.md).
+
+**Context.** `MarketInfo` combines instrument, venue, listing, mapping, output
+symbol, and prediction-market outcome metadata. Kalshi stores a parent
+`event_ticker` in `exchange_market_id`, and `count_selected_markets`
+deduplicates by that field, so several markets under one event can be counted as
+one. Polymarket repeats a parent condition ID for every outcome token. The
+current runtime `SourceId { shard, replica }` identifies a worker, not an
+external data source.
+
+**Decision.** An instrument has a persistent platform identity independent of
+its ticker, listing, venue, feed, connection, or output symbol. Instrument,
+instrument identifier, venue, venue operator, market segment, listing, venue
+instrument mapping, data provider, feed, feed session, and entitlement are
+separate concepts. Identifiers are namespaced, scoped, and effective-dated.
+Runtime worker identity is not external source identity. Events and conditions
+are groupings, not instruments.
+
+**Alternatives.** Keep `MarketInfo` as universal identity; key by ticker; use
+ISIN as a universal key; model every source as a public exchange; extend
+`ExchangeKind` into a venue registry.
+
+**Consequences.** Cross-venue and OTC/dark-pool identity becomes representable
+without rewriting venue behavior into the core. Migration is incremental and
+must preserve existing SBE output. The Kalshi selected-market undercount remains
+until a later implementation PR. This decision adds no code and no dependency.
+
+**Implementation.** None in this decision. The migration sequence and
+non-goals are in
+[ADR 0001](adr/0001-instrument-and-venue-reference-model.md).
+
+**Verification.** Documentation review against the ADR acceptance criteria;
+the requirement matrix and architecture inventory are unchanged.
