@@ -1,21 +1,29 @@
-# Prediction-market order-book collector
+# Cross-Venue Market Data Infrastructure
 
-A Rust collector for live prediction-market order books. It discovers markets,
-maintains one normalized book per outcome symbol, writes the supplied FIX SBE
-schema, and can record the exact public websocket frames. Kalshi and Polymarket
-adapters share the same core.
+A Rust market-data platform for the ingestion, normalization, validation,
+journaling, replay, and analysis of financial-market data across asset classes
+and trading venues. The current implementation ingests live prediction-market
+order books from Kalshi and Polymarket, maintains one normalized book per
+outcome symbol, writes the supplied FIX SBE schema, and can record the exact
+public websocket frames. The two adapters share the same core.
 
-This is a market-data collector, not a trading system. It does not submit
-orders, hold positions, or run strategy or pre-trade risk. Kalshi live
-validation is blocked without credentials; Polymarket full-universe discovery is
-verified, but simultaneous subscription at that fan-out is not claimed.
+This is a market-data system, not a trading system. It does not submit orders,
+hold positions, or run strategy or pre-trade risk. Kalshi live validation is
+blocked without credentials; Polymarket full-universe discovery is verified,
+but simultaneous subscription at that fan-out is not claimed.
+
+The current code supports prediction markets only. The target domain, adapter
+boundaries, numeric model, event model, and compatibility rules are in the
+[platform charter](docs/platform-charter.md). That document describes design
+intent; it is not a claim that those capabilities are implemented.
 
 ## Review path
 
-1. [Architecture](docs/architecture.md) — current topology and failure model.
-2. [Requirement-to-test matrix](docs/requirement-test-matrix.md) — exact test evidence per requirement.
-3. [Verification](docs/verification.md) — gate results, exact commits, limits.
-4. [Design decisions](docs/design-decisions.md) — why the boundaries exist.
+1. [Platform charter](docs/platform-charter.md) — target domain and boundaries, explicitly separate from current support.
+2. [Architecture](docs/architecture.md) — current topology and failure model.
+3. [Requirement-to-test matrix](docs/requirement-test-matrix.md) — exact test evidence per requirement.
+4. [Verification](docs/verification.md) — gate results, exact commits, limits.
+5. [Design decisions](docs/design-decisions.md) — why the boundaries exist.
 
 Implementation contracts: [replay format](docs/replay-format.md),
 [raw-frame journal](docs/raw-frame-journal.md), [latency](docs/latency.md),

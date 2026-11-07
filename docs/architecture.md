@@ -1,16 +1,25 @@
 # Architecture
 
 This document describes the implementation in `src/`, not the historical
-archive audit or a target platform. Gate results are in
+archive audit or a target platform. The target domain and adapter boundaries
+are in [`platform-charter.md`](platform-charter.md); this document does not
+claim that the target capabilities exist. Gate results are in
 [`verification.md`](verification.md); requirement evidence is in
 [`docs/requirement-test-matrix.md`](requirement-test-matrix.md).
 
 ## Scope
 
-The system is a read-only prediction-market data collector. It discovers
+The current system is a read-only prediction-market data collector. It discovers
 markets, maintains one normalized order book per outcome symbol, writes the
 supplied SBE schema, and optionally records exact public websocket frames. It
 does not submit orders, hold positions, or run strategy or pre-trade risk.
+
+Kalshi and Polymarket are the first venue adapters, not the limits of the
+domain model. The current constraints that follow from the prediction-market
+scope — venue enumeration, binary outcome fields, the `[0, 1]` price range, and
+six-decimal fixed-point values — are listed as deliberate gaps in the
+[platform charter](platform-charter.md). Removing them is scheduled work, not an
+implicit capability of this implementation.
 
 ## Runtime composition
 
@@ -143,7 +152,9 @@ Readiness is a local admission signal, not a venue certification. `/readyz`
 reflects discovery, catalog, persistence, writer, and journal state; it cannot
 prove that a live venue delivered every update. The collector is a market-data
 component and is **not a production certification** for order entry, execution,
-or trading. See [`operating-envelope.md`](operating-envelope.md) for measured
+or trading. Order management, execution, portfolio management, and risk remain
+separate bounded contexts under the [platform charter](platform-charter.md).
+See [`operating-envelope.md`](operating-envelope.md) for measured
 limits and [`design-decisions.md`](design-decisions.md) for the rationale.
 Implementation contracts are in [`replay-format.md`](replay-format.md),
 [`raw-frame-journal.md`](raw-frame-journal.md), and [`latency.md`](latency.md).
