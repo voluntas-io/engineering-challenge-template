@@ -259,11 +259,13 @@ the event model.
 |---|---|---|
 | 1 | Final retry-delay evidence (PR #28) | Final-attempt behaviour has deterministic regression coverage |
 | 2 | Platform charter (PR #29) | Implemented system and target scope are separate |
-| 3 | [Instrument and venue reference-model ADR](adr/0001-instrument-and-venue-reference-model.md) (PR #30, revision 1) | Instrument, listing, venue, and source have separate meanings |
-| 4 | Numeric model ADR (PR #31) | Price and quantity no longer assume prediction-market ranges |
-| 5 | Event model ADR (PR #32) | Trades, quotes, books, auctions, and RFQs have distinct semantics |
-| 6 | Schema evolution plan (PR #33) | Challenge SBE compatibility remains intact |
-| 7 | First traditional-market connector (PR #34) | Shared core works outside prediction markets |
+| 3 | [Instrument and venue reference-model ADR](adr/0001-instrument-and-venue-reference-model.md) (PR #30) | Accepted; instrument, listing, venue, and source have separate meanings |
+| 4 | ADR 0001 revision (PR #31) | Accepted; venue identifiers resolve to listings, and cross-listing identity stays unresolved without evidence |
+| 5 | ADR 0001 acceptance (PR #32) | Accepted; scenario 8.2 separates listing resolution from cross-listing instrument identity |
+| 6 | Numeric model ADR (PR #33) | Price and quantity no longer assume prediction-market ranges |
+| 7 | Event model ADR (PR #34) | Trades, quotes, books, auctions, and RFQs have distinct semantics |
+| 8 | Schema evolution plan (PR #35) | Challenge SBE compatibility remains intact |
+| 9 | First traditional-market connector (PR #36) | Shared core works outside prediction markets |
 
 Choose the first traditional-market connector only after checking feed access,
 entitlement terms, protocol documentation, and test-data availability. Do not

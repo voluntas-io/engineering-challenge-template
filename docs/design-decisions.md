@@ -237,8 +237,8 @@ buffer downstream and preserve file order.
 
 ## 9. Instrument and venue reference model
 
-**Status.** Proposed. The full decision, entity definitions, cardinalities,
-temporal rules, and worked scenarios are in
+**Status.** Accepted 2026-11-07. The full decision, entity definitions,
+cardinalities, temporal rules, and worked scenarios are in
 [ADR 0001](adr/0001-instrument-and-venue-reference-model.md).
 
 **Context.** `MarketInfo` combines instrument, venue, listing, mapping, output

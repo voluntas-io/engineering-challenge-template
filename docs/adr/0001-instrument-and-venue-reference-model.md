@@ -1,9 +1,10 @@
 # ADR 0001: Instrument and venue reference model
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-11-07
-- **Revision:** 1 — listing/segment cardinality, provider/feed mappings, and
-  same-ticker ambiguity.
+- **Accepted:** 2026-11-07
+- **Revision:** 2 — scenario 8.2 mapping resolution separated from
+  cross-listing instrument identity; status Accepted.
 - **Scope:** Documentation and design decision only. No Rust types, catalog,
   database, schema, or adapter changes.
 - **Related:** [Platform charter](../platform-charter.md),
@@ -11,12 +12,14 @@
 
 ## 1. Status and context
 
-This ADR is **Proposed**. It becomes **Accepted** only after the identity
-invariant and worked scenarios are reviewed.
+This ADR is **Accepted** as of 2026-11-07, after the revision 2 correction to
+scenario 8.2. Acceptance covers the identity invariant and the domain model.
 
-Revision 1 amends the listing/segment cardinality, adds provider/feed instrument
-mappings for instruments without listings, and makes same-ticker resolution
-explicitly unresolved or ambiguous without authoritative evidence.
+Revision 1 amended the listing/segment cardinality, added provider/feed
+instrument mappings for instruments without listings, and made same-ticker
+resolution explicitly unresolved or ambiguous without authoritative evidence.
+Revision 2 separates venue-identifier resolution to a listing from the separate
+question of whether two listings belong to the same canonical instrument.
 
 The platform charter defines five boundaries and states that an instrument is
 not a venue symbol. The current implementation does not yet separate those
@@ -455,16 +458,19 @@ Result: one instrument, two listings, two venue-assigned mappings. A
 consolidated view may derive one best bid/offer across listings, but the
 listings and their books stay distinct.
 
-### 8.2 Same ticker on two unrelated venues
+### 8.2 Same ticker on two venues
 
 ```text
-Mapping M1: venue A, optional segment A1, symbol ABC -> unresolved
-Mapping M2: venue B, optional segment B1, symbol ABC -> unresolved
+VenueInstrumentMapping M1 -> Listing L1 (venue A, optional segment A1)
+VenueInstrumentMapping M2 -> Listing L2 (venue B, optional segment B1)
+
+Cross-listing instrument identity: unresolved or ambiguous
 ```
 
-Result: two scoped mappings. Ticker text alone does not establish two
-instruments, and it does not establish one. Without authoritative identity
-evidence the resolution is unresolved or ambiguous. Evidence that the
+Each venue identifier resolves to its own listing, following the mapping
+definition. Whether L1 and L2 belong to the same canonical instrument is a
+separate question. Ticker equality is not authoritative evidence, so the
+cross-listing identity remains unresolved or ambiguous. Evidence that the
 instruments are distinct creates two instruments; evidence that they are the
 same instrument creates one instrument with two listings. The mappings,
 provenance, and any candidate set are retained in both cases.
@@ -644,7 +650,7 @@ This ADR does not:
 | Listing and segment | Listing belongs to exactly one venue; market segment is optional |
 | Venue-assigned mapping | Effective-dated and scoped to a venue/listing |
 | Provider/feed mapping | Resolves directly to an instrument without requiring a listing; separate from venue-assigned identifiers |
-| Same ticker on two venues | Unresolved or ambiguous without authoritative evidence |
+| Same ticker on two venues | Each venue mapping resolves to its listing; cross-listing instrument identity is unresolved or ambiguous without authoritative evidence |
 | Feed and feed session | Different identities |
 | Runtime `SourceId` | Documented as worker identity, not a data source |
 | Event/condition grouping | Distinct from tradable instruments |
@@ -654,6 +660,9 @@ This ADR does not:
 | Code changes | None |
 | Schema changes | None |
 
-The ADR is ready to move from **Proposed** to **Accepted** when the invariant in
-section 1 is accepted and the worked scenarios in section 8 are accepted as the
-required semantics. Implementation begins only after that review.
+This ADR was accepted on 2026-11-07. The identity invariant in section 1 and the
+worked scenarios in section 8 are the accepted semantics. Revision 2 corrected
+scenario 8.2 so venue identifiers resolve to their listings while cross-listing
+instrument identity remains unresolved or ambiguous without authoritative
+evidence. Implementation begins under the migration sequence in section 10,
+with the numeric model considered separately.
