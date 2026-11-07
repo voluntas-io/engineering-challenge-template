@@ -486,3 +486,245 @@ async fn non_retryable_http_status_is_not_retried() {
     server.await.unwrap();
     assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 1);
 }
+
+#[tokio::test]
+async fn empty_intermediate_page_preserves_cursor_and_continues() {
+    let page1 = page_json(vec![], Some("c1"));
+    let page2 = page_json(vec![market_json("A-1")], None);
+    let (base, handle) = serve(vec![
+        http_response("HTTP/1.1 200 OK", &page1),
+        http_response("HTTP/1.1 200 OK", &page2),
+    ])
+    .await;
+    let exchange = test_exchange();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        exchange.fetch_markets_from(&base, 0),
+    )
+    .await
+    .expect("empty intermediate timed out")
+    .unwrap();
+    let requests = handle.await.unwrap();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(result.markets.len(), 1);
+    assert_eq!(result.markets[0].native_symbol, "A-1");
+    assert_eq!(result.stats.pages, 2);
+}
+
+#[tokio::test]
+async fn empty_terminal_page_returns_empty_discovery_result() {
+    let page = page_json(vec![], None);
+    let (base, handle) = serve(vec![http_response("HTTP/1.1 200 OK", &page)]).await;
+    let exchange = test_exchange();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        exchange.fetch_markets_from(&base, 0),
+    )
+    .await
+    .expect("empty terminal timed out")
+    .unwrap();
+    let requests = handle.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert!(result.markets.is_empty());
+    assert_eq!(result.stats.pages, 1);
+    assert_eq!(result.stats.selected_markets, 0);
+}
+
+#[tokio::test]
+async fn malformed_page_envelope_is_rejected() {
+    for body in [
+        r#"{"cursor": null}"#,
+        r#"{"markets": [{"ticker": "A-1", "status": "active"}]}"#,
+        r#"{"markets": [], "cursor": 17}"#,
+    ] {
+        let (base, _handle) = serve(vec![http_response("HTTP/1.1 200 OK", body)]).await;
+        let exchange = test_exchange();
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            exchange.fetch_markets_from(&base, 0),
+        )
+        .await
+        .expect("malformed envelope timed out");
+        assert!(
+            result.is_err(),
+            "malformed envelope must not become a successful result: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn malformed_later_page_rejects_discovery_round() {
+    let page1 = page_json(vec![market_json("A-1")], Some("c1"));
+    // A page whose only record is malformed: empty ticker is an error, and
+    // the whole round must fail rather than returning the first page.
+    let page2 = serde_json::json!({
+        "markets": [{
+            "ticker": "",
+            "status": "active",
+            "market_type": "binary",
+            "close_time": "2027-01-01T00:00:00Z",
+            "price_ranges": [{"start": "0.00", "end": "1.00", "step": "0.01"}]
+        }],
+        "cursor": null
+    })
+    .to_string();
+    let (base, _handle) = serve(vec![
+        http_response("HTTP/1.1 200 OK", &page1),
+        http_response("HTTP/1.1 200 OK", &page2),
+    ])
+    .await;
+    let exchange = test_exchange();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        exchange.fetch_markets_from(&base, 0),
+    )
+    .await
+    .expect("malformed later page timed out");
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn cursor_cycle_rejects_discovery_round() {
+    let page1 = page_json(vec![market_json("A-1")], Some("c1"));
+    let page2 = page_json(vec![market_json("B-1")], Some("c2"));
+    let page3 = page_json(vec![market_json("C-1")], Some("c1"));
+    let (base, _handle) = serve(vec![
+        http_response("HTTP/1.1 200 OK", &page1),
+        http_response("HTTP/1.1 200 OK", &page2),
+        http_response("HTTP/1.1 200 OK", &page3),
+    ])
+    .await;
+    let exchange = test_exchange();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        exchange.fetch_markets_from(&base, 0),
+    )
+    .await
+    .expect("cursor cycle timed out");
+    assert!(result.is_err());
+    assert!(result.unwrap_err().to_string().contains("cursor repeated"));
+}
+
+#[tokio::test]
+async fn market_cap_at_page_boundary_does_not_fetch_next_page() {
+    let page1 = page_json(
+        vec![market_json("A-1"), market_json("B-1")],
+        Some("next-cursor"),
+    );
+    let (base, handle) = serve(vec![http_response("HTTP/1.1 200 OK", &page1)]).await;
+    let exchange = test_exchange();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        exchange.fetch_markets_from(&base, 2),
+    )
+    .await
+    .expect("cap boundary timed out")
+    .unwrap();
+    let requests = handle.await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(result.markets.len(), 2);
+    assert_eq!(result.stats.pages, 1);
+}
+
+#[tokio::test]
+async fn retryable_http_statuses_retry_and_increment_stats() {
+    let ok_page = page_json(vec![market_json("A-1")], None);
+    // 429 then 503 then success: two retries on the same logical page.
+    let (base, _handle) = serve(vec![
+        http_response("HTTP/1.1 429 Too Many Requests", "rate"),
+        http_response("HTTP/1.1 503 Service Unavailable", "down"),
+        http_response("HTTP/1.1 200 OK", &ok_page),
+    ])
+    .await;
+    let exchange = test_exchange();
+    // fetch_page retries increment the returned counter; fetch_markets_from
+    // surfaces the total in stats.retries.
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        exchange.fetch_markets_from(&base, 0),
+    )
+    .await
+    .expect("retryable statuses timed out")
+    .unwrap();
+    assert_eq!(result.markets.len(), 1);
+    assert_eq!(result.stats.retries, 2);
+}
+
+#[tokio::test]
+async fn retryable_status_exhaustion_stops_after_five_attempts() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let requests = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed = std::sync::Arc::clone(&requests);
+    let server = tokio::spawn(async move {
+        for _ in 0..5 {
+            let Ok((mut socket, _)) = listener.accept().await else {
+                return;
+            };
+            let mut buffer = [0u8; 4096];
+            let _ = socket.read(&mut buffer).await;
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let _ = socket
+                .write_all(b"HTTP/1.1 503 Service Unavailable\r\nRetry-After: 0\r\nContent-Length: 4\r\nConnection: close\r\n\r\ndown")
+                .await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    let exchange = test_exchange();
+    let url = url::Url::parse(&format!("http://{address}/markets")).unwrap();
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        exchange.fetch_page(&url),
+    )
+    .await
+    .expect("exhaustion timed out");
+    assert!(result.is_err());
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(8),
+        "fifth failure must not incur a final backoff sleep"
+    );
+    server.await.unwrap();
+    assert_eq!(requests.load(std::sync::atomic::Ordering::SeqCst), 5);
+}
+
+#[tokio::test]
+async fn transport_failure_retries_before_success() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        // First connection: accept and close without responding.
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buffer = [0u8; 4096];
+            let _ = socket.read(&mut buffer).await;
+            let _ = socket.shutdown().await;
+        }
+        // Second connection: valid page.
+        if let Ok((mut socket, _)) = listener.accept().await {
+            let mut buffer = [0u8; 4096];
+            let _ = socket.read(&mut buffer).await;
+            let page = page_json(vec![market_json("A-1")], None);
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                page.len(),
+                page
+            );
+            let _ = socket.write_all(response.as_bytes()).await;
+            let _ = socket.shutdown().await;
+        }
+    });
+    let exchange = test_exchange();
+    let base = url::Url::parse(&format!("http://{address}/")).unwrap();
+    let result = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        exchange.fetch_markets_from(&base, 0),
+    )
+    .await
+    .expect("transport retry timed out")
+    .unwrap();
+    assert_eq!(result.markets.len(), 1);
+    assert_eq!(result.stats.retries, 1);
+    server.await.unwrap();
+}

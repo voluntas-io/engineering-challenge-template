@@ -67,11 +67,20 @@ fn convert_kalshi_page(
 
 #[derive(Debug, Deserialize)]
 struct MarketsPage {
-    #[serde(default)]
     markets: Vec<RawMarket>,
-    #[serde(default)]
-    cursor: Option<String>,
+    cursor: Value,
 }
+
+fn parse_page_cursor(value: Value) -> anyhow::Result<Option<String>> {
+    match value {
+        Value::Null => Ok(None),
+        Value::String(cursor) if cursor.is_empty() => Ok(None),
+        Value::String(cursor) => Ok(Some(cursor)),
+        _ => bail!("Kalshi discovery cursor must be a string or null"),
+    }
+}
+
+const MAX_PAGE_ATTEMPTS: u32 = 5;
 
 #[derive(Debug, Deserialize)]
 struct RawMarket {
@@ -158,13 +167,13 @@ impl KalshiExchange {
             let (page, page_retries) = self.fetch_page(&url).await?;
             retries = retries.saturating_add(page_retries);
             pages = pages.saturating_add(1);
+            let page_cursor = parse_page_cursor(page.cursor)?;
             debug!(
                 page = pages,
                 count = page.markets.len(),
-                cursor = page.cursor.as_deref().unwrap_or(""),
+                cursor = page_cursor.as_deref().unwrap_or(""),
                 "Kalshi discovery page"
             );
-            let page_cursor = page.cursor;
             convert_kalshi_page(page.markets, max_markets, &mut markets, &mut skipped)?;
 
             if max_markets != 0 && markets.len() >= max_markets {
@@ -223,7 +232,7 @@ impl KalshiExchange {
 
     async fn fetch_page(&self, url: &Url) -> anyhow::Result<(MarketsPage, u64)> {
         let mut last_error = None;
-        for attempt in 0..5u32 {
+        for attempt in 0..MAX_PAGE_ATTEMPTS {
             let mut request = self.client().get(url.clone());
             if let Some(auth) = self.auth() {
                 let headers = auth
@@ -260,14 +269,18 @@ impl KalshiExchange {
                         bail!("{message}");
                     }
                     last_error = Some(message);
-                    sleep(retry_delay(attempt, retry_after)).await;
+                    if attempt + 1 < MAX_PAGE_ATTEMPTS {
+                        sleep(retry_delay(attempt, retry_after)).await;
+                    }
                     continue;
                 }
                 Err(error) => {
                     last_error = Some(format!("Kalshi discovery request failed: {error}"));
                 }
             }
-            sleep(retry_delay(attempt, None)).await;
+            if attempt + 1 < MAX_PAGE_ATTEMPTS {
+                sleep(retry_delay(attempt, None)).await;
+            }
         }
         Err(anyhow::anyhow!(
             "{}",
