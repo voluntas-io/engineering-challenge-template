@@ -153,3 +153,30 @@ soak, a controlled benchmark, or a full-universe subscription claim.
 - Production order entry.
 - OMS and independent pre-trade risk.
 - Live execution safety.
+
+## Addendum (2026-11-13, branch `fix/kalshi-merged-subscribe-acks`)
+
+This branch fixes a Kalshi protocol-folding defect found while cross-checking
+the adapter against the venue's documented message set: a repeated
+`subscribe` on one connection merges into the connection's single
+`orderbook_delta` sid and is acknowledged with `ok` (carrying `sid`, `seq`,
+and the full `msg.market_tickers` list), not a fresh `subscribed`. The
+adapter now resolves those acknowledgements into the tracked subscription;
+see design decision 10. Four regression tests cover the merged-`ok` path,
+the no-sid fallback, the authoritative full-list replacement, and a reused
+`subscribed` sid. Gate results re-run on this branch:
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | Pass |
+| `cargo clippy --all-targets --locked -- -D warnings` | Pass |
+| `cargo test --all-targets --locked` | **311 passed, 0 failed, 3 ignored**: 274 library, 1 binary, 12 mock-exchange E2E, 9 inspect, 10 numeric-model, 2 replay, 3 session-recovery |
+| `cargo test --doc --locked` | Pass: 1 documentation test |
+| `python3 scripts/check_architecture.py --check` | Pass: 46 Rust source files, 46 reachable from crate roots |
+| `python3 scripts/check_matrix_tests.py` | Pass: 128 file-qualified references across 14 requirements; all 24 mandatory evidence tests present |
+| `python3 -m unittest discover -s scripts -p 'test_*.py'` | Pass: 24 gate tests |
+| `python3 -m unittest discover -s scripts/assurance -p 'test_*.py'` | Pass: 16 assurance-tool tests |
+
+The fix is verified against unit-level mock-server scenarios only; Kalshi
+live validation remains blocked without credentials. No gate above was
+transferred from an earlier tree.

@@ -272,3 +272,48 @@ non-goals are in
 
 **Verification.** Documentation review against the ADR acceptance criteria;
 the requirement matrix and architecture inventory are unchanged.
+
+## 10. Kalshi subscription acknowledgement folding
+
+**Context.** Kalshi keeps one `orderbook_delta` subscription per websocket
+connection. A repeated `subscribe` on the same connection adds its markets to
+the existing `sid`; the venue acknowledges it with `ok`, which carries the
+connection's `sid`, the subscription `seq`, and, for current responses, the
+full `msg.market_tickers` list, rather than issuing a fresh `subscribed`.
+Chunked initial loads and later top-ups therefore complete against one sid,
+not one sid per command. The earlier adapter expected a `subscribed` per
+command: every chunk after the first stayed in the pending map until the
+acknowledgement deadline, the tracked market set covered only the first
+chunk, and the session cycled until a seq failure forced a reconnect.
+
+**Decision.** `KalshiMessage::Ok` resolves the pending `subscribe` it
+acknowledges. The markets fold into the subscription the venue names,
+creating it when the venue has not acknowledged it yet; the venue's
+`msg.market_tickers`, when present, replaces the tracked set; an `ok` without
+a sid folds into the single tracked subscription; an `ok` that can be
+unambiguously assigned to nothing fails the connection so the next reconnect
+resubscribes cleanly instead of running on divergent local state. A
+`subscribed` that names an existing sid is folded the same way rather than
+rejected. `ok` sequence numbers still feed the sequence tracker so a
+following delta is not misread as a gap.
+
+**Alternatives.** Issue one `subscribe` per connection and drop the chunking;
+send `unsubscribe` before resubscribing on every terminal error; treat a
+missing acknowledgement as fatal without resolving it.
+
+**Consequences.** The tracked subscription matches the venue's actual sid
+state, the pending map drains, and newly added markets reconcile against the
+authoritative market list. A loss of a market from the venue's list now
+re-subscribes exactly that market on the next reconcile. Terminal subscription
+errors still rely on seq-gap detection and reconnect for a full resync; a
+venue that answers a repeated `subscribe` with a fresh sid is still handled,
+as is a venue that puts `sid` only on `subscribed`.
+
+**Implementation.** `src/exchange/kalshi/codec.rs` (`Ok::full_tickers`),
+`src/exchange/kalshi/session.rs` (`merge_subscription`, the `Ok` and
+`Subscribed` arms).
+
+**Verification.** `src/exchange/kalshi/session.rs::repeated_subscribe_acked_with_ok_merges_into_the_connection_sid`,
+`src/exchange/kalshi/session.rs::merged_ok_without_sid_uses_the_single_orderbook_subscription`,
+`src/exchange/kalshi/session.rs::merged_ok_market_list_replaces_the_tracked_set_authoritatively`,
+`src/exchange/kalshi/session.rs::subscribed_with_an_existing_sid_merges_instead_of_failing`.

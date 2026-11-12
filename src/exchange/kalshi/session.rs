@@ -388,6 +388,53 @@ impl KalshiSession {
         Ok(())
     }
 
+    /// Acknowledge a `subscribe` command the venue folded into an existing
+    /// subscription. Kalshi keeps one `orderbook_delta` subscription per
+    /// connection: a repeated `subscribe` adds its markets to the existing
+    /// sid and is acknowledged with `ok`, not a fresh `subscribed`. Fold the
+    /// markets into the tracked subscription for that sid, creating it when
+    /// the venue has not acknowledged it yet. `full_tickers`, when present,
+    /// is the venue's authoritative list of markets on the subscription and
+    /// replaces the tracked set.
+    fn merge_subscription(
+        &mut self,
+        sid: Option<i64>,
+        markets: BTreeSet<String>,
+        full_tickers: Option<Vec<String>>,
+    ) -> Result<(), SessionFailure> {
+        let target =
+            sid.or_else(|| (self.orderbook_subs.len() == 1).then_some(self.orderbook_subs[0].sid));
+        let Some(target) = target else {
+            return Err(SessionFailure::protocol(anyhow::anyhow!(
+                "Kalshi subscribe acknowledgement named no sid and cannot be assigned unambiguously"
+            )));
+        };
+        match self
+            .orderbook_subs
+            .iter_mut()
+            .find(|subscription| subscription.sid == target)
+        {
+            Some(subscription) => {
+                if let Some(full) = full_tickers {
+                    subscription.markets = full.into_iter().collect();
+                } else {
+                    subscription.markets.extend(markets);
+                }
+            }
+            None => {
+                let markets: BTreeSet<String> = match full_tickers {
+                    Some(full) => full.into_iter().collect(),
+                    None => markets,
+                };
+                self.orderbook_subs.push(OrderbookSubscription {
+                    sid: target,
+                    markets,
+                });
+            }
+        }
+        Ok(())
+    }
+
     fn complete_update(&mut self, id: u64) -> Option<PendingUpdate> {
         let pending = self.pending_updates.remove(&id)?;
         match pending.action {
@@ -639,22 +686,19 @@ impl MarketDataSession for KalshiSession {
                             received_at_us,
                         ));
                     }
-                    if self
+                    if let Some(existing) = self
                         .orderbook_subs
-                        .iter()
-                        .any(|subscription| subscription.sid == sid)
+                        .iter_mut()
+                        .find(|subscription| subscription.sid == sid)
                     {
-                        return Err(SessionFailure::protocol_with_frame(
-                            anyhow::anyhow!("Kalshi orderbook subscription reused sid {sid}"),
-                            RawFrame {
-                                kind,
-                                payload: text.as_bytes().to_vec(),
-                            },
-                            received_at_us,
-                        ));
+                        // One sid per connection: a repeated `subscribe`
+                        // merged here is folded into the tracked set rather
+                        // than rejected.
+                        existing.markets.extend(markets);
+                    } else {
+                        self.orderbook_subs
+                            .push(OrderbookSubscription { sid, markets });
                     }
-                    self.orderbook_subs
-                        .push(OrderbookSubscription { sid, markets });
                 } else if channel == "market_lifecycle_v2" {
                     self.lifecycle_sid = Some(sid);
                 }
@@ -671,8 +715,24 @@ impl MarketDataSession for KalshiSession {
                     "subscription_ack",
                 ))
             }
-            KalshiMessage::Ok { id, sid, seq } => {
+            KalshiMessage::Ok {
+                id,
+                sid,
+                seq,
+                full_tickers,
+            } => {
                 let completed = id.and_then(|id| self.complete_update(id));
+                // The venue folds a repeated `subscribe` into the
+                // connection's existing orderbook subscription and answers
+                // with `ok`, not a fresh `subscribed`. Resolve those
+                // acknowledgements here so the tracked set, the pending map
+                // and the 15 s acknowledgement deadline stay consistent
+                // with what the venue actually holds.
+                if let Some(id) = id
+                    && let Some(markets) = self.pending_subscribes.remove(&id)
+                {
+                    self.merge_subscription(sid, markets, full_tickers)?;
+                }
                 // The official `ok` example for update_subscription carries
                 // `sid` and `seq`. Observing that sequence number prevents a
                 // false gap on the next delta. An ack without a sequence
@@ -1431,6 +1491,311 @@ mod tests {
             }
             other => panic!("unexpected failure: {other:?}"),
         }
+        server.await.unwrap();
+        session.close().await;
+    }
+
+    #[tokio::test]
+    async fn repeated_subscribe_acked_with_ok_merges_into_the_connection_sid() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut ws = accept(listener).await;
+            let lifecycle = read_json(&mut ws).await;
+            assert_eq!(lifecycle["cmd"], "subscribe");
+            send_json(
+                &mut ws,
+                json!({
+                    "id": lifecycle["id"], "type": "subscribed",
+                    "msg": {"channel": "market_lifecycle_v2", "sid": 1}
+                }),
+            )
+            .await;
+            // The first orderbook subscribe creates the sid; every repeated
+            // subscribe folds into it and is acknowledged with `ok`, carrying
+            // the venue's cumulative market list.
+            let first = read_json(&mut ws).await;
+            assert_eq!(first["cmd"], "subscribe");
+            let first_markets: Vec<String> = first["params"]["market_tickers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value.as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(first_markets, vec!["M1".to_owned(), "M2".to_owned()]);
+            send_json(
+                &mut ws,
+                json!({
+                    "id": first["id"], "type": "subscribed",
+                    "msg": {"channel": "orderbook_delta", "sid": 2}
+                }),
+            )
+            .await;
+            let second = read_json(&mut ws).await;
+            assert_eq!(second["cmd"], "subscribe");
+            send_json(
+                &mut ws,
+                json!({
+                    "id": second["id"], "type": "ok", "sid": 2, "seq": 1,
+                    "msg": {"market_tickers": ["M1", "M2", "M3", "M4"]}
+                }),
+            )
+            .await;
+            let third = read_json(&mut ws).await;
+            assert_eq!(third["cmd"], "subscribe");
+            send_json(
+                &mut ws,
+                json!({
+                    "id": third["id"], "type": "ok", "sid": 2, "seq": 2,
+                    "msg": {"market_tickers": ["M1", "M2", "M3", "M4", "M5"]}
+                }),
+            )
+            .await;
+        });
+
+        let settings = KalshiSettings {
+            batch_size: 2,
+            ..KalshiSettings::default()
+        };
+        let mut session = KalshiSession::new(settings, test_auth(), ConnectOptions::default());
+        session.ws_url = format!("ws://{address}");
+        session.connect().await.unwrap();
+        session
+            .apply_subscriptions(&BTreeSet::from([
+                "M1".to_owned(),
+                "M2".to_owned(),
+                "M3".to_owned(),
+                "M4".to_owned(),
+                "M5".to_owned(),
+            ]))
+            .await
+            .unwrap();
+
+        for _ in 0..4 {
+            tokio::time::timeout(Duration::from_secs(5), session.next_frame())
+                .await
+                .expect("frame timeout")
+                .expect("acknowledgement handling failed");
+        }
+
+        assert_eq!(session.orderbook_subs.len(), 1);
+        let tracked: Vec<String> = session.orderbook_subs[0].markets.iter().cloned().collect();
+        assert_eq!(
+            tracked,
+            vec![
+                "M1".to_owned(),
+                "M2".to_owned(),
+                "M3".to_owned(),
+                "M4".to_owned(),
+                "M5".to_owned(),
+            ]
+        );
+        assert!(session.pending_subscribes.is_empty());
+        assert!(session.pending_since.is_none());
+        server.await.unwrap();
+        session.close().await;
+    }
+
+    #[tokio::test]
+    async fn merged_ok_without_sid_uses_the_single_orderbook_subscription() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut ws = accept(listener).await;
+            let lifecycle = read_json(&mut ws).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "id": lifecycle["id"], "type": "subscribed",
+                    "msg": {"channel": "market_lifecycle_v2", "sid": 1}
+                }),
+            )
+            .await;
+            let first = read_json(&mut ws).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "id": first["id"], "type": "subscribed",
+                    "msg": {"channel": "orderbook_delta", "sid": 2}
+                }),
+            )
+            .await;
+            // A venue that answers the repeated subscribe with an `ok`
+            // carrying no sid at all still must not trip the acknowledgement
+            // deadline or strand the pending command.
+            let second = read_json(&mut ws).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "id": second["id"], "type": "ok", "seq": 9
+                }),
+            )
+            .await;
+        });
+
+        let settings = KalshiSettings {
+            batch_size: 1,
+            ..KalshiSettings::default()
+        };
+        let mut session = KalshiSession::new(settings, test_auth(), ConnectOptions::default());
+        session.ws_url = format!("ws://{address}");
+        session.connect().await.unwrap();
+        session
+            .apply_subscriptions(&BTreeSet::from(["M1".to_owned(), "M2".to_owned()]))
+            .await
+            .unwrap();
+
+        for _ in 0..3 {
+            tokio::time::timeout(Duration::from_secs(5), session.next_frame())
+                .await
+                .expect("frame timeout")
+                .expect("acknowledgement handling failed");
+        }
+
+        assert_eq!(session.orderbook_subs.len(), 1);
+        let tracked: Vec<String> = session.orderbook_subs[0].markets.iter().cloned().collect();
+        assert_eq!(tracked, vec!["M1".to_owned(), "M2".to_owned()]);
+        assert!(session.pending_subscribes.is_empty());
+        assert!(session.pending_since.is_none());
+        server.await.unwrap();
+        session.close().await;
+    }
+
+    #[tokio::test]
+    async fn merged_ok_market_list_replaces_the_tracked_set_authoritatively() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut ws = accept(listener).await;
+            let lifecycle = read_json(&mut ws).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "id": lifecycle["id"], "type": "subscribed",
+                    "msg": {"channel": "market_lifecycle_v2", "sid": 1}
+                }),
+            )
+            .await;
+            let first = read_json(&mut ws).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "id": first["id"], "type": "subscribed",
+                    "msg": {"channel": "orderbook_delta", "sid": 2}
+                }),
+            )
+            .await;
+            let second = read_json(&mut ws).await;
+            // The venue's list is the source of truth: it omits a market the
+            // client believed was on the subscription.
+            send_json(
+                &mut ws,
+                json!({
+                    "id": second["id"], "type": "ok", "sid": 2, "seq": 1,
+                    "msg": {"market_tickers": ["M2"]}
+                }),
+            )
+            .await;
+            // Losing M1 from the tracked set makes the next reconcile send a
+            // fresh subscribe for it; the venue folds it into the same sid.
+            let third = read_json(&mut ws).await;
+            assert_eq!(third["cmd"], "subscribe");
+            let resync: Vec<String> = third["params"]["market_tickers"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|value| value.as_str().unwrap().to_owned())
+                .collect();
+            assert_eq!(resync, vec!["M1".to_owned()]);
+            send_json(
+                &mut ws,
+                json!({
+                    "id": third["id"], "type": "ok", "sid": 2, "seq": 2,
+                    "msg": {"market_tickers": ["M1", "M2"]}
+                }),
+            )
+            .await;
+        });
+
+        let settings = KalshiSettings {
+            batch_size: 1,
+            ..KalshiSettings::default()
+        };
+        let mut session = KalshiSession::new(settings, test_auth(), ConnectOptions::default());
+        session.ws_url = format!("ws://{address}");
+        session.connect().await.unwrap();
+        session
+            .apply_subscriptions(&BTreeSet::from(["M1".to_owned(), "M2".to_owned()]))
+            .await
+            .unwrap();
+
+        for _ in 0..4 {
+            tokio::time::timeout(Duration::from_secs(5), session.next_frame())
+                .await
+                .expect("frame timeout")
+                .expect("acknowledgement handling failed");
+        }
+
+        assert_eq!(session.orderbook_subs.len(), 1);
+        let tracked: Vec<String> = session.orderbook_subs[0].markets.iter().cloned().collect();
+        assert_eq!(tracked, vec!["M1".to_owned(), "M2".to_owned()]);
+        assert!(session.pending_subscribes.is_empty());
+        assert!(session.pending_since.is_none());
+        server.await.unwrap();
+        session.close().await;
+    }
+
+    #[tokio::test]
+    async fn subscribed_with_an_existing_sid_merges_instead_of_failing() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let mut ws = accept(listener).await;
+            let lifecycle = read_json(&mut ws).await;
+            send_json(
+                &mut ws,
+                json!({
+                    "id": lifecycle["id"], "type": "subscribed",
+                    "msg": {"channel": "market_lifecycle_v2", "sid": 1}
+                }),
+            )
+            .await;
+            for _ in 0..2 {
+                let command = read_json(&mut ws).await;
+                send_json(
+                    &mut ws,
+                    json!({
+                        "id": command["id"], "type": "subscribed",
+                        "msg": {"channel": "orderbook_delta", "sid": 2}
+                    }),
+                )
+                .await;
+            }
+        });
+
+        let settings = KalshiSettings {
+            batch_size: 1,
+            ..KalshiSettings::default()
+        };
+        let mut session = KalshiSession::new(settings, test_auth(), ConnectOptions::default());
+        session.ws_url = format!("ws://{address}");
+        session.connect().await.unwrap();
+        session
+            .apply_subscriptions(&BTreeSet::from(["M1".to_owned(), "M2".to_owned()]))
+            .await
+            .unwrap();
+
+        for _ in 0..3 {
+            tokio::time::timeout(Duration::from_secs(5), session.next_frame())
+                .await
+                .expect("frame timeout")
+                .expect("a repeated `subscribed` on an existing sid must not fail the session");
+        }
+
+        assert_eq!(session.orderbook_subs.len(), 1);
+        let tracked: Vec<String> = session.orderbook_subs[0].markets.iter().cloned().collect();
+        assert_eq!(tracked, vec!["M1".to_owned(), "M2".to_owned()]);
+        assert!(session.pending_subscribes.is_empty());
         server.await.unwrap();
         session.close().await;
     }

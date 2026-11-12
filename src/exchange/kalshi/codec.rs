@@ -47,6 +47,9 @@ pub enum KalshiMessage {
         id: Option<u64>,
         sid: Option<i64>,
         seq: Option<u64>,
+        /// The full market list the server holds on this subscription
+        /// after the update, when the acknowledgement carries one.
+        full_tickers: Option<Vec<String>>,
     },
     Error {
         id: Option<u64>,
@@ -265,6 +268,17 @@ pub fn decode_kalshi_message(payload: &str, received_at_us: i64) -> anyhow::Resu
             id,
             sid: object.get("sid").and_then(Value::as_i64),
             seq: object.get("seq").and_then(Value::as_u64),
+            full_tickers: object
+                .get("msg")
+                .and_then(|message| message.get("market_tickers"))
+                .and_then(Value::as_array)
+                .map(|tickers| {
+                    tickers
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                }),
         }),
         "error" => {
             let message = object.get("msg").and_then(Value::as_object);
