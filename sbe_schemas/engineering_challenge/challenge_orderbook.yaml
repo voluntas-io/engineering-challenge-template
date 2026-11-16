@@ -39,7 +39,7 @@ messages:
     id: 2
     description: An update to a single price level, on a single orderbook
     fields:
-      backtest_timestamp: { id: 1, type: timestamp }
+      received_at: { id: 1, type: timestamp }
       exchange_timestamp: { id: 2, type: timestamp }
       price_level:
         id: 4
